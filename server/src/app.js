@@ -5,8 +5,13 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import stravaRoutes from "./routes/strava.routes.js";
+import leaderboardRoutes from "./routes/leaderboard.routes.js";
+import { connectDB } from "./db/connect.js";
 
 dotenv.config();
+
+// Connect to MongoDB
+connectDB();
 
 const app = express();
 
@@ -19,6 +24,7 @@ app.use(express.json());
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/strava", stravaRoutes);
+app.use("/api/leaderboard", leaderboardRoutes);
 
 app.get("/", (req, res) => {
   res.json({ status: "ok", message: "Strava API server running 🚀" });

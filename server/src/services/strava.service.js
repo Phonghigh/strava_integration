@@ -1,17 +1,12 @@
 // src/services/strava.service.js
-// Core Strava API logic: OAuth token exchange, refresh, and data fetching
-
 import axios from "axios";
-import { getToken, saveToken } from "../utils/tokenStore.js";
+import { User } from "../models/User.model.js";
 
 const STRAVA_API = "https://www.strava.com/api/v3";
 const STRAVA_TOKEN_URL = "https://www.strava.com/oauth/token";
 
-/**
- * Exchange the OAuth authorization code for access + refresh tokens.
- * Called once after the user completes the Strava consent screen.
- */
-export const exchangeToken = async (code) => {
+export const exchangeTokenAndSaveUser = async (code) => {
+  // 1. Exchange code
   const res = await axios.post(STRAVA_TOKEN_URL, {
     client_id: process.env.STRAVA_CLIENT_ID,
     client_secret: process.env.STRAVA_CLIENT_SECRET,
@@ -19,39 +14,49 @@ export const exchangeToken = async (code) => {
     grant_type: "authorization_code",
   });
 
-  saveToken(res.data);
-  return res.data;
+  const data = res.data;
+  const athlete = data.athlete;
+
+  // 2. Find or create user
+  const user = await User.findOneAndUpdate(
+    { stravaId: athlete.id.toString() },
+    {
+      firstName: athlete.firstname,
+      lastName: athlete.lastname,
+      profile: athlete.profile,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      tokenExpiresAt: data.expires_at,
+    },
+    { new: true, upsert: true }
+  );
+
+  return user;
 };
 
-/**
- * Return a valid access token, refreshing automatically if it has expired.
- */
-export const refreshTokenIfNeeded = async () => {
-  const token = getToken();
-  if (!token) throw new Error("No token found — user must connect Strava first");
-
+export const refreshTokenIfNeeded = async (user) => {
   const now = Math.floor(Date.now() / 1000);
 
-  if (token.expires_at < now) {
+  // Buffer of 5 minutes just to be safe
+  if (user.tokenExpiresAt < now + 300) {
     const res = await axios.post(STRAVA_TOKEN_URL, {
       client_id: process.env.STRAVA_CLIENT_ID,
       client_secret: process.env.STRAVA_CLIENT_SECRET,
       grant_type: "refresh_token",
-      refresh_token: token.refresh_token,
+      refresh_token: user.refreshToken,
     });
 
-    saveToken(res.data);
-    return res.data.access_token;
+    user.accessToken = res.data.access_token;
+    user.refreshToken = res.data.refresh_token;
+    user.tokenExpiresAt = res.data.expires_at;
+    await user.save();
   }
 
-  return token.access_token;
+  return user.accessToken;
 };
 
-/**
- * Fetch the authenticated athlete's recent activities (up to 30).
- */
-export const getActivities = async () => {
-  const access_token = await refreshTokenIfNeeded();
+export const getActivitiesForUser = async (user) => {
+  const access_token = await refreshTokenIfNeeded(user);
 
   const res = await axios.get(`${STRAVA_API}/athlete/activities`, {
     headers: { Authorization: `Bearer ${access_token}` },
@@ -61,11 +66,8 @@ export const getActivities = async () => {
   return res.data;
 };
 
-/**
- * Fetch the authenticated athlete's profile.
- */
-export const getAthlete = async () => {
-  const access_token = await refreshTokenIfNeeded();
+export const getAthleteForUser = async (user) => {
+  const access_token = await refreshTokenIfNeeded(user);
 
   const res = await axios.get(`${STRAVA_API}/athlete`, {
     headers: { Authorization: `Bearer ${access_token}` },

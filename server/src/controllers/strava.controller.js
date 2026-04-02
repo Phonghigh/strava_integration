@@ -1,11 +1,7 @@
 // src/controllers/strava.controller.js
-// HTTP handlers — thin layer that delegates to the service
 
-import {
-  exchangeToken,
-  getActivities,
-  getAthlete,
-} from "../services/strava.service.js";
+import { exchangeTokenAndSaveUser } from "../services/strava.service.js";
+import { syncAllUsersActivities } from "../services/sync.service.js";
 
 /**
  * GET /api/strava/connect
@@ -25,8 +21,7 @@ export const connectStrava = (req, res) => {
 
 /**
  * GET /api/strava/callback
- * Handles the OAuth redirect from Strava, exchanges the code for tokens,
- * then sends the user back to the frontend dashboard.
+ * Handles the OAuth redirect from Strava.
  */
 export const callback = async (req, res) => {
   try {
@@ -40,38 +35,15 @@ export const callback = async (req, res) => {
       return res.status(400).json({ error: "Missing authorization code" });
     }
 
-    await exchangeToken(code);
+    // 1. Exchange token and save/update the user in MongoDB
+    const user = await exchangeTokenAndSaveUser(code);
+    
+    // 2. Trigger an immediate background sync for this user to get their initial data
+    syncAllUsersActivities().catch(err => console.error("Initial sync error:", err));
+
     res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
   } catch (err) {
     console.error("[callback] Token exchange failed:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-/**
- * GET /api/strava/activities
- * Returns the authenticated athlete's recent 30 activities as JSON.
- */
-export const activities = async (req, res) => {
-  try {
-    const data = await getActivities();
-    res.json(data);
-  } catch (err) {
-    console.error("[activities] Error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-/**
- * GET /api/strava/athlete
- * Returns the authenticated athlete's profile as JSON.
- */
-export const athlete = async (req, res) => {
-  try {
-    const data = await getAthlete();
-    res.json(data);
-  } catch (err) {
-    console.error("[athlete] Error:", err.message);
     res.status(500).json({ error: err.message });
   }
 };

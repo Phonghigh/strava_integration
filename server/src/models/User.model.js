@@ -15,6 +15,10 @@ const UserSchema = new mongoose.Schema({
   profile: {
     type: String, // avatar URL
   },
+  teamName: {
+    type: String,
+    default: null, // by default user has no team
+  },
   accessToken: {
     type: String,
     required: true,

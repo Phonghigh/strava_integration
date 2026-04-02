@@ -21,15 +21,22 @@ const UserSchema = new mongoose.Schema({
   },
   accessToken: {
     type: String,
-    required: true,
+    required: false, // Optional for crawled users
   },
   refreshToken: {
     type: String,
-    required: true,
+    required: false, // Optional for crawled users
   },
   tokenExpiresAt: {
     type: Number, // UNIX timestamp from Strava
-    required: true,
+    required: false, // Optional for crawled users
+  },
+  isAuthorized: {
+    type: Boolean,
+    default: false, // Default to false for crawled users
+  },
+  location: {
+    type: String, // e.g. "Ho Chi Minh City, Vietnam"
   }
 }, { timestamps: true });
 

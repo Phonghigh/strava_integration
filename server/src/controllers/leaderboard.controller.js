@@ -1,6 +1,7 @@
 import { Activity } from "../models/Activity.model.js";
 import { User } from "../models/User.model.js";
 import mongoose from "mongoose";
+import { syncClubData } from "../services/sync.service.js";
 
 /**
  * GET /api/v1/leaderboard/individuals
@@ -42,7 +43,8 @@ export const getIndividualsLeaderboard = async (req, res) => {
           userId: "$_id",
           name: { $concat: ["$athlete.firstName", " ", "$athlete.lastName"] },
           avatar: "$athlete.profile",
-          distance: { $divide: ["$distance", 1000] }, // Conver to Km
+          location: "$athlete.location", // Added location to leaderboard
+          distance: { $divide: ["$distance", 1000] }, // Convert to Km
           activitiesCount: 1
         }
       },
@@ -172,10 +174,10 @@ export const getAthleteDetail = async (req, res) => {
  */
 export const triggerSync = async (req, res) => {
   try {
-    const result = await syncAllUsersActivities();
-    res.json({ message: "Sync complete", ...result });
+    const result = await syncClubData();
+    res.json({ message: "Full club sync complete", ...result });
   } catch (err) {
     console.error("[triggerSync] Error:", err.message);
-    res.status(500).json({ error: "Failed to sync activities" });
+    res.status(500).json({ error: "Failed to sync club activities" });
   }
 };

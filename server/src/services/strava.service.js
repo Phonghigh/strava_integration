@@ -27,6 +27,7 @@ export const exchangeTokenAndSaveUser = async (code) => {
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
       tokenExpiresAt: data.expires_at,
+      isAuthorized: true,
     },
     { new: true, upsert: true }
   );

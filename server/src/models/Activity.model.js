@@ -9,7 +9,13 @@ const ActivitySchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
+    required: false, // Made optional for club feed discovery
+  },
+  athleteName: {
+    type: String, // from feed
+  },
+  location: {
+    type: String, // from feed
   },
   name: {
     type: String,

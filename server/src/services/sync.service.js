@@ -2,6 +2,7 @@
 import { User } from "../models/User.model.js";
 import { Activity } from "../models/Activity.model.js";
 import { getActivitiesForUser } from "./strava.service.js";
+import { scrapeClubMembers, scrapeClubActivities } from "./scraper.service.js";
 
 /**
  * Loops through all users in the DB, fetches their recent Strava activities,
@@ -12,6 +13,11 @@ export const syncAllUsersActivities = async () => {
   let totalSynced = 0;
 
   for (const user of users) {
+    if (!user.accessToken || user.accessToken === '') {
+      // Bỏ qua những thành viên được scraper tìm thấy nhưng chưa connect OAuth (không có token)
+      continue;
+    }
+
     try {
       // 1. Fetch from Strava (automatically refreshes token if needed)
       const activities = await getActivitiesForUser(user);
@@ -67,4 +73,38 @@ export const syncAllUsersActivities = async () => {
   }
 
   return { usersCount: users.length, totalSynced };
+};
+
+/**
+ * Higher level function to sync both OAuth users and discovered club members.
+ * This is the ultimate "Dashboard Sync" job.
+ */
+export const syncClubData = async (options = { runPhase1: true, runPhase2: true }) => {
+  const clubId = process.env.STRAVA_CLUB_ID;
+  if (!clubId) throw new Error("STRAVA_CLUB_ID not set in .env");
+
+  let membersCount = 0;
+  let clubFeedSynced = 0;
+
+  console.log(`[Sync] Starting club sync (Mode: ${JSON.stringify(options)}) for ID: ${clubId}`);
+
+  // 1. Scrape member list (Authenticated via Cookies)
+  if (options.runPhase1) {
+    console.log(`[Sync] Phase 1: Reconciling club members list...`);
+    const membersResult = await scrapeClubMembers(clubId);
+    console.log(`[Sync] Successfully reconciled ${membersResult.totalScraped} members (over ${membersResult.pageCount} pages).`);
+    membersCount = membersResult.totalScraped;
+  }
+
+  // 2. Scrape activities for the whole club (Unified Discovery)
+  if (options.runPhase2) {
+    console.log(`[Sync] Phase 2: Scraping recent club activity feed...`);
+    const clubActs = await scrapeClubActivities(clubId);
+    clubFeedSynced = clubActs.length;
+  }
+
+  return {
+    membersCount,
+    clubFeedSynced: clubFeedSynced || 0
+  };
 };

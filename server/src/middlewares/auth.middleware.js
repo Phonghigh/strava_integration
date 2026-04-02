@@ -4,15 +4,30 @@ import { User } from "../models/User.model.js";
 
 export const requireAuth = async (req, res, next) => {
   try {
+    let token;
+    
+    // Check Authorization header first
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "Missing or invalid authorization header" });
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.split(" ")[1];
+    } 
+    // Fallback: check request body for "token" field
+    else if (req.body && req.body.token) {
+      token = req.body.token;
     }
 
-    const token = authHeader.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Missing authorization token in header or body" });
+    }
     
     // Default fallback for development if JWT_SECRET is not in .env yet
     const secret = process.env.JWT_SECRET || "vietseeds_secret_placeholder";
+
+    // ✅ SPECIAL CASE FOR EXTERNAL SYNC (n8n): If token matches the secret string exactly
+    if (token === secret) {
+       // Authenticated as system (No user attached, suitable for global sync)
+       return next();
+    }
 
     const decoded = jwt.verify(token, secret);
     

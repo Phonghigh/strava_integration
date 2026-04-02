@@ -35,9 +35,15 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-// ─── Start server ─────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
+// ─── Start server (local dev only) ────────────────────────────────────────────
+// Vercel runs this file as a serverless function using the exported `app`.
+// app.listen() is skipped on Vercel — only runs locally with `npm run dev`.
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`✅ Server running on http://localhost:${PORT}`);
+  });
+}
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
-});
+// ─── Export for Vercel ────────────────────────────────────────────────────────
+export default app;

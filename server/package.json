@@ -6,7 +6,8 @@
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "dev": "node --watch src/app.js"
+    "dev": "node --watch src/app.js",
+    "sync-now": "node manual-sync.js"
   },
   "engines": {
     "node": ">=18.0.0"

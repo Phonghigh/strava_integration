@@ -1,18 +1,29 @@
 import mongoose from 'mongoose';
 
+let cachedPromise = null;
+
 export const connectDB = async () => {
-  try {
-    if (!process.env.MONGODB_URI) {
-      throw new Error('MONGODB_URI environment variable is missing.');
-    }
-    
-    // Mongoose connection
-    const conn = await mongoose.connect(process.env.MONGODB_URI);
-    
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
-  } catch (error) {
-    console.error(`Error connecting to MongoDB: ${error.message}`);
-    // Do not exit process in Vercel/serverless environments, let it throw so Vercel logs it
-    throw error;
+  if (cachedPromise) {
+    return cachedPromise;
   }
+
+  if (!process.env.MONGODB_URI) {
+    throw new Error('MONGODB_URI environment variable is missing.');
+  }
+
+  const opts = {
+    bufferCommands: false, // Prevents queries from hanging if not connected
+    serverSelectionTimeoutMS: 5000, // Fails fast instead of timing out at 10s
+  };
+
+  cachedPromise = mongoose.connect(process.env.MONGODB_URI, opts).then((mongooseInstance) => {
+    console.log(`✅ MongoDB Connected: ${mongooseInstance.connection.host}`);
+    return mongooseInstance;
+  }).catch((error) => {
+    cachedPromise = null;
+    console.error(`❌ Error connecting to MongoDB: ${error.message}`);
+    throw error;
+  });
+
+  return cachedPromise;
 };

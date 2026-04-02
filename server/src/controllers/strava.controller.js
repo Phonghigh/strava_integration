@@ -1,5 +1,6 @@
 // src/controllers/strava.controller.js
 
+import jwt from "jsonwebtoken";
 import { exchangeTokenAndSaveUser } from "../services/strava.service.js";
 import { syncAllUsersActivities } from "../services/sync.service.js";
 
@@ -47,16 +48,24 @@ export const callback = async (req, res) => {
     const user = await exchangeTokenAndSaveUser(code);
     console.log(`[Strava] User saved to DB! Name: ${user.firstName} ${user.lastName}`);
     
-    // 2. Trigger an immediate background sync for this user to get their initial data
+    // 2. Generate a JWT for the frontend session
+    const secret = process.env.JWT_SECRET || "vietseeds_secret_placeholder";
+    const token = jwt.sign(
+      { id: user._id, firstName: user.firstName },
+      secret,
+      { expiresIn: "30d" }
+    );
+
+    // 3. Trigger an immediate background sync for this user to get their initial data
     console.log(`[Sync] Background sync triggered instantly...`);
     syncAllUsersActivities()
       .then(res => console.log(`[Sync] Background sync COMPLETED.`, res))
       .catch(err => console.error("[Sync] Initial sync error:", err));
 
-    // Redirect back to the dynamic frontend URL (fallback to dashboard if path not specified)
-    // If state was just a base URL, we append /dashboard
-    const redirectPath = finalFrontendUrl.includes("/dashboard") ? finalFrontendUrl : `${finalFrontendUrl}/dashboard`;
-    res.redirect(redirectPath);
+    // Redirect to the exact frontend callback page with the JWT token
+    // Append the token properly whether there's already a query (?) or not (&)
+    const connector = finalFrontendUrl.includes("?") ? "&" : "?";
+    res.redirect(`${finalFrontendUrl}${connector}token=${token}`);
   } catch (err) {
     console.error("[callback] Token exchange failed:", err.message);
     res.status(500).json({ error: err.message });

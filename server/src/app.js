@@ -22,6 +22,18 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Thêm logger chi tiết để theo dõi các endpoint
+app.use((req, res, next) => {
+  console.log(`\n[${new Date().toISOString()}] ➡️ ${req.method} ${req.url}`);
+  if (Object.keys(req.query).length > 0) {
+    console.log(`   🔍 Query:`, req.query);
+  }
+  if (Object.keys(req.body).length > 0) {
+    console.log(`   📦 Body:`, req.body);
+  }
+  next();
+});
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/strava", stravaRoutes);
 app.use("/api/leaderboard", leaderboardRoutes);

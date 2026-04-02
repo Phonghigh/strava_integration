@@ -36,10 +36,15 @@ export const callback = async (req, res) => {
     }
 
     // 1. Exchange token and save/update the user in MongoDB
+    console.log(`[Strava] Exchange token process started for code: ${code}`);
     const user = await exchangeTokenAndSaveUser(code);
+    console.log(`[Strava] User saved to DB! Name: ${user.firstName} ${user.lastName}`);
     
     // 2. Trigger an immediate background sync for this user to get their initial data
-    syncAllUsersActivities().catch(err => console.error("Initial sync error:", err));
+    console.log(`[Sync] Background sync triggered instantly...`);
+    syncAllUsersActivities()
+      .then(res => console.log(`[Sync] Background sync COMPLETED.`, res))
+      .catch(err => console.error("[Sync] Initial sync error:", err));
 
     res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
   } catch (err) {

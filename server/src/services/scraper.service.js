@@ -170,39 +170,35 @@ export const scrapeClubActivities = async (clubId) => {
     let scrollCount = 0;
     // Scroll loop until we reach the target date (April 1st, 2026)
     while (!reachedTargetDate) {
-        console.log(`[Scraper] Rhythmic scrolling (Step ${scrollCount + 1})...`);
+        console.log(`[Scraper] Rhythmic scrolling (Step ${scrollCount + 1}). Total captured: ${activities.length}`);
         
         // Scroll down in many small steps to simulate human reading/scrolling
-        for (let j = 0; j < 12; j++) {
-            await page.evaluate(() => window.scrollBy(0, 400));
-            await new Promise(r => setTimeout(r, 300));
+        for (let j = 0; j < 10; j++) {
+            await page.evaluate(() => window.scrollBy(0, 500));
+            await new Promise(r => setTimeout(r, 200));
         }
 
-        // Wait for the infinite scroll to trigger and finalize
-        await new Promise(r => setTimeout(r, 5000));
+        // Wait for the infinite scroll to trigger
+        await new Promise(r => setTimeout(r, 3500));
         
         scrollCount++;
 
-        // Check the last activity date to see if we should stop
-        if (activities.length > 0) {
-            // Find the last entry that has an activity object
-            const lastActivityEntry = [...activities].reverse().find(entries => entries.activity);
+        // Check the last activity date to see if we reached the absolute start date (April 1st)
+        if (activities.length > 0 && !reachedTargetDate) {
+            const lastActivityEntry = [...activities].reverse().find(entry => entry.activity);
             const lastAct = lastActivityEntry?.activity;
 
             if (lastAct && lastAct.startDate) {
                 const lastDate = new Date(lastAct.startDate);
                 if (lastDate < TARGET_DATE) {
-                    console.log(`[Scraper] Reached target date: ${lastDate.toISOString()}. Stopping scrolls.`);
+                    console.log(`[Scraper] Reached absolute target date: ${lastDate.toISOString()}. Stopping.`);
                     reachedTargetDate = true;
                 }
             }
         }
         
-        // Safety break to prevent infinite loops in case of unexpected page behavior
-        if (scrollCount > 200) {
-            console.log("[Scraper] Safety limit of 200 scrolls reached. Stopping to prevent infinite loop.");
-            break;
-        }
+        // Safety break
+        if (scrollCount > 150) break;
     }
 
     // Deduplicate and filter by date
@@ -257,12 +253,22 @@ export const scrapeClubActivities = async (clubId) => {
            }
         }
 
-        const distanceStr = act.stats?.find(s => s.label === 'Distance')?.value || '0';
+        // Improved Distance Extraction: Look for the stat whose subtitle is "Distance"
         let distanceMeters = 0;
-        if (distanceStr.includes('km')) {
-            distanceMeters = parseFloat(distanceStr) * 1000;
-        } else {
-            distanceMeters = parseFloat(distanceStr);
+        const stats = act.stats || [];
+        const distanceSubtitleIndex = stats.findIndex(s => s.value === 'Distance');
+        
+        if (distanceSubtitleIndex !== -1 && distanceSubtitleIndex > 0) {
+            // The value is usually in the element just before the subtitle
+            let rawValue = stats[distanceSubtitleIndex - 1].value || "0";
+            // Remove HTML tags like <abbr>...
+            const cleanValue = rawValue.replace(/<[^>]*>/g, '').trim();
+            
+            if (cleanValue.toLowerCase().includes('km')) {
+                distanceMeters = parseFloat(cleanValue) * 1000;
+            } else {
+                distanceMeters = parseFloat(cleanValue);
+            }
         }
 
         // Extract run location (e.g. "Phường Phước Vĩnh, Thừa Thiên Huế Province")

@@ -36,7 +36,21 @@ const UserSchema = new mongoose.Schema({
     default: false, // Default to false for crawled users
   },
   location: {
-    type: String, // e.g. "Ho Chi Minh City, Vietnam"
+    type: String, // from Strava
+  },
+  city: {
+    type: String, // from Form (e.g. "Hồ Chí Minh")
+  },
+  group: {
+    type: String, // from Form (e.g. "11")
+  },
+  relationship: {
+    type: String, // e.g. "Seeds", "Alumni"
+  },
+  email: {
+    type: String,
+    lowercase: true,
+    trim: true,
   }
 }, { timestamps: true });
 

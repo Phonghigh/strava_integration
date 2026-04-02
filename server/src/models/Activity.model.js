@@ -20,6 +20,13 @@ const ActivitySchema = new mongoose.Schema({
   movingTime: {
     type: Number, // in seconds
   },
+  pace: {
+    type: String, // pace in "M:SS" format or similar
+  },
+  isValid: {
+    type: Boolean, // whether this activity met the pace requirements 
+    default: true
+  },
   type: {
     type: String, // e.g., "Run", "Ride"
   },

@@ -5,7 +5,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import stravaRoutes from "./routes/strava.routes.js";
-import leaderboardRoutes from "./routes/leaderboard.routes.js";
 import { connectDB } from "./db/connect.js";
 
 dotenv.config();
@@ -34,9 +33,13 @@ app.use((req, res, next) => {
   next();
 });
 
+import apiV1 from "./routes/index.js";
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
+app.use("/api/v1", apiV1);
+
+// Legacy strava oauth (optional fallback or cleanup later)
 app.use("/api/strava", stravaRoutes);
-app.use("/api/leaderboard", leaderboardRoutes);
 
 app.get("/", (req, res) => {
   res.json({ status: "ok", message: "Strava API server running 🚀" });

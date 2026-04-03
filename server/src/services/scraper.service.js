@@ -168,23 +168,69 @@ export const scrapeClubActivities = async (clubId) => {
     const TARGET_DATE = new Date('2026-04-01T00:00:00Z');
     let reachedTargetDate = false;
     let scrollCount = 0;
-    // Scroll loop until we reach the target date (April 1st, 2026)
+    
+    // Track seen IDs during this session to avoid redundant DB checks
+    const checkedInSession = new Set();
+
+    // Scroll loop until we reach the target date (April 1st, 2026) or find already synced data
+    let lastHeight = await page.evaluate('document.body.scrollHeight');
+    let stagnantCount = 0;
+
     while (!reachedTargetDate) {
-        console.log(`[Scraper] Rhythmic scrolling (Step ${scrollCount + 1}). Total captured: ${activities.length}`);
+        console.log(`[Scraper] Precise scrolling (Step ${scrollCount + 1}). Total captured: ${activities.length}`);
         
-        // Scroll down in many small steps to simulate human reading/scrolling
-        for (let j = 0; j < 10; j++) {
-            await page.evaluate(() => window.scrollBy(0, 500));
-            await new Promise(r => setTimeout(r, 200));
+        // --- IMPROVED SCROLL LOGIC ---
+        // 1. Scroll to the absolute bottom of the current rendered page
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        
+        // 2. Add some "jitter" scrolling to trigger the intersection observer
+        await page.evaluate(() => window.scrollBy(0, -150)); 
+        await new Promise(r => setTimeout(r, 400));
+        await page.evaluate(() => window.scrollBy(0, 200));
+
+        // 3. Wait for the infinite scroll to trigger and load content
+        await new Promise(r => setTimeout(r, 2500));
+        
+        // 4. Check if page height increased
+        const newHeight = await page.evaluate('document.body.scrollHeight');
+        if (newHeight === lastHeight) {
+            stagnantCount++;
+            if (stagnantCount > 5) {
+                console.log(`[Scraper] Page height stagnant for 5 steps. End of feed reached.`);
+                break;
+            }
+        } else {
+            stagnantCount = 0;
+            lastHeight = newHeight;
         }
 
-        // Wait for the infinite scroll to trigger
-        await new Promise(r => setTimeout(r, 3500));
-        
         scrollCount++;
 
-        // Check the last activity date to see if we reached the absolute start date (April 1st)
-        if (activities.length > 0 && !reachedTargetDate) {
+        // --- EARLY STOP OPTIMIZATION: Check if we hit already synced items ---
+        if (activities.length > 0) {
+            // Take the last 20 captured activities to check existence in DB
+            // (We check a batch to ensure we didn't just hit a single random already-synced item)
+            const recentActIds = activities
+                .filter(entry => entry.activity && !checkedInSession.has(entry.activity.id))
+                .slice(-20)
+                .map(entry => entry.activity.id.toString());
+
+            if (recentActIds.length > 0) {
+                const existingCount = await Activity.countDocuments({ 
+                    stravaId: { $in: recentActIds } 
+                });
+
+                if (existingCount > 5) { // If more than 5 in this batch are already synced, we can stop
+                    console.log(`[Scraper] Found ${existingCount} already synced activities in recent batch. Stopping scroll.`);
+                    reachedTargetDate = true;
+                    break; 
+                }
+                
+                // Add to checked cache so we don't query DB for these same IDs again
+                recentActIds.forEach(id => checkedInSession.add(id));
+            }
+
+            // Check if we passed the absolute hard-limit target date
             const lastActivityEntry = [...activities].reverse().find(entry => entry.activity);
             const lastAct = lastActivityEntry?.activity;
 

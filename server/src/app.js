@@ -15,10 +15,23 @@ await connectDB();
 const app = express();
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  "http://localhost:8080",
+  "http://localhost:8081",
+  process.env.FRONTEND_URL // Thêm link Vercel của bạn
+].filter(Boolean); // Lọc bỏ nếu frontend_url bị trống
+
 app.use(cors({
-  origin: true, // Allow all origins dynamic
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+  origin: (origin, callback) => {
+    // Cho phép tất cả các nguồn hoặc nguồn trong whitelist
+    if (!origin || allowedOrigins.includes(origin) || origin.includes("localhost")) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept", "X-Requested-With"],
   credentials: true,
 }));
 app.use(express.json());

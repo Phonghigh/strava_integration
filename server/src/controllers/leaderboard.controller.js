@@ -78,15 +78,14 @@ export const getIndividualsLeaderboard = async (req, res) => {
           totalDistance: { $sum: "$validActivities.distance" },
           totalMovingTime: { $sum: "$validActivities.movingTime" },
           activitiesCount: { $size: "$validActivities" },
-          // Tính quãng đường trong 24h qua (đơn vị: meters)
-          distance24h: {
+          distanceLast24h: {
             $sum: {
               $map: {
                 input: {
                   $filter: {
                     input: "$validActivities",
                     as: "act",
-                    cond: { $gte: ["$$act.startDate", last24hTime] }
+                    cond: { $gte: ["$$act.startDate", new Date(Date.now() - 24 * 60 * 60 * 1000)] }
                   }
                 },
                 as: "recent",
@@ -107,9 +106,9 @@ export const getIndividualsLeaderboard = async (req, res) => {
           teamName: 1,
           gender: 1,
           distance: { $divide: ["$totalDistance", 1000] },
-          trend: { $divide: ["$distance24h", 1000] },
           totalMovingTime: 1,
-          activitiesCount: 1
+          activitiesCount: 1,
+          trend: { $divide: ["$distanceLast24h", 1000] }
         }
       },
       { $sort: { distance: -1, name: 1 } },
@@ -134,7 +133,8 @@ export const getIndividualsLeaderboard = async (req, res) => {
         rank: skip + index + 1,
         ...item,
         name: (item.name || "").trim(),
-        pace: paceStr
+        pace: paceStr,
+        trend: parseFloat((item.trend || 0).toFixed(2))
       };
     });
 

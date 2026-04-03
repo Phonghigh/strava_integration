@@ -10,7 +10,15 @@ import { syncClubData } from "../services/sync.service.js";
 export const getIndividualsLeaderboard = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    let limitInput = req.query.limit;
+    let limit;
+    
+    if (limitInput === "all") {
+      limit = 999999;
+    } else {
+      limit = parseInt(limitInput) || 50;
+    }
+    
     const skip = (page - 1) * limit;
     const { startDate, endDate } = req.query;
 
@@ -44,9 +52,12 @@ export const getIndividualsLeaderboard = async (req, res) => {
         $project: {
           _id: 0,
           userId: "$_id",
+          stravaId: "$athlete.stravaId",
           name: { $concat: ["$athlete.firstName", " ", "$athlete.lastName"] },
           avatar: "$athlete.profile",
           location: "$athlete.location",
+          teamName: "$athlete.teamName", // Thêm thông tin Team
+          gender: "$athlete.gender",     // Thêm thông tin Giới tính
           distance: { $divide: ["$distance", 1000] },
           activitiesCount: 1
         }
@@ -73,13 +84,13 @@ export const getIndividualsLeaderboard = async (req, res) => {
     }));
 
     res.json({
-      data: rankedLeaderboard,
       meta: {
         total,
         totalPages: Math.ceil(total / limit),
         currentPage: page,
         limit
-      }
+      },
+      data: rankedLeaderboard
     });
   } catch (err) {
     console.error("[Individuals Leaderboard Error]:", err.message);
@@ -176,27 +187,47 @@ export const getTeamLeaderboard = async (req, res) => {
 export const getAthleteDetail = async (req, res) => {
   try {
     const { id } = req.params;
+    
+    // Validate MongoDB ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "Invalid User ID" });
+      return res.status(400).json({ error: "Invalid User ID format" });
     }
 
+    // 1. Get User Profile (Hide sensitive tokens)
     const user = await User.findById(id).select("-accessToken -refreshToken -tokenExpiresAt");
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const activities = await Activity.find({ userId: id }).sort({ startDate: -1 });
+    // 2. Get User Activities (Valid only)
+    const activities = await Activity.find({ 
+      userId: id,
+      isValid: true 
+    }).sort({ startDate: -1 });
 
-    const totalDistance = activities.reduce((sum, act) => sum + act.distance, 0);
+    // 3. Calculate Summary Stats
+    const totalDistanceMeters = activities.reduce((sum, act) => sum + act.distance, 0);
+    const totalDistanceKm = totalDistanceMeters / 1000;
 
     res.json({
       athlete: user,
       stats: {
         activityCount: activities.length,
-        totalDistance
+        totalDistanceKm: parseFloat(totalDistanceKm.toFixed(2)),
+        totalDistanceMeters
       },
-      activities
+      activities: activities.map(act => ({
+        id: act.stravaId,
+        name: act.name,
+        distanceKm: parseFloat((act.distance / 1000).toFixed(2)),
+        movingTime: act.movingTime,
+        pace: act.pace,
+        date: act.startDate,
+        location: act.location,
+        type: act.type
+      }))
     });
+
   } catch (err) {
     console.error("[getAthleteDetail] Error:", err.message);
     res.status(500).json({ error: "Failed to fetch athlete detail" });

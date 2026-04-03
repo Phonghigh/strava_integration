@@ -20,14 +20,43 @@ export const getIndividualsLeaderboard = async (req, res) => {
     }
     
     const skip = (page - 1) * limit;
-    const { startDate, endDate } = req.query;
+    const { startDate: qStart, endDate: qEnd, timeframe } = req.query;
 
-    const matchQuery = { isValid: true };
-    if (startDate || endDate) {
-      matchQuery.startDate = {};
-      if (startDate) matchQuery.startDate.$gte = new Date(startDate);
-      if (endDate) matchQuery.startDate.$lte = new Date(endDate);
+    let startDate = qStart ? new Date(qStart) : new Date("2026-04-01T00:00:00Z");
+    let endDate = qEnd ? new Date(qEnd) : new Date("2026-04-30T23:59:59Z");
+
+    const now = new Date();
+    // Clamp today to end of challenge if it's past it
+    const challengeEnd = new Date("2026-04-30T23:59:59Z");
+    const today = now > challengeEnd ? challengeEnd : now;
+
+    if (timeframe === "week") {
+      const day = today.getDay() || 7; // Sunday = 7
+      const weekStart = new Date(today);
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(today.getDate() - day + 1);
+      
+      const challengeStart = new Date("2026-04-01T00:00:00Z");
+      startDate = weekStart < challengeStart ? challengeStart : weekStart;
+      endDate = new Date(today);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (timeframe === "month") {
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      
+      const challengeStart = new Date("2026-04-01T00:00:00Z");
+      startDate = monthStart < challengeStart ? challengeStart : monthStart;
+      endDate = new Date(today);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (timeframe === "all") {
+      startDate = new Date("2026-04-01T00:00:00Z");
+      endDate = new Date("2026-04-30T23:59:59Z");
     }
+
+    const matchQuery = { 
+      isValid: true,
+      startDate: { $gte: startDate, $lte: endDate }
+    };
+
 
     // F. Apply Pagination (Starting from USER to include 0km people)
     const leaderboard = await User.aggregate([
@@ -117,14 +146,41 @@ export const getTeamLeaderboard = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
-    const { startDate, endDate } = req.query;
+    const { startDate: qStart, endDate: qEnd, timeframe } = req.query;
 
-    const matchQuery = { isValid: true };
-    if (startDate || endDate) {
-      matchQuery.startDate = {};
-      if (startDate) matchQuery.startDate.$gte = new Date(startDate);
-      if (endDate) matchQuery.startDate.$lte = new Date(endDate);
+    let startDate = qStart ? new Date(qStart) : new Date("2026-04-01T00:00:00Z");
+    let endDate = qEnd ? new Date(qEnd) : new Date("2026-04-30T23:59:59Z");
+
+    const now = new Date();
+    const challengeEnd = new Date("2026-04-30T23:59:59Z");
+    const today = now > challengeEnd ? challengeEnd : now;
+
+    if (timeframe === "week") {
+      const day = today.getDay() || 7; 
+      const weekStart = new Date(today);
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(today.getDate() - day + 1);
+      
+      const challengeStart = new Date("2026-04-01T00:00:00Z");
+      startDate = weekStart < challengeStart ? challengeStart : weekStart;
+      endDate = new Date(today);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (timeframe === "month") {
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      const challengeStart = new Date("2026-04-01T00:00:00Z");
+      startDate = monthStart < challengeStart ? challengeStart : monthStart;
+      endDate = new Date(today);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (timeframe === "all") {
+      startDate = new Date("2026-04-01T00:00:00Z");
+      endDate = new Date("2026-04-30T23:59:59Z");
     }
+
+    const matchQuery = { 
+      isValid: true,
+      startDate: { $gte: startDate, $lte: endDate }
+    };
+
 
     // Execute Team Leaderboard aggregation
     const teamsData = await User.aggregate([

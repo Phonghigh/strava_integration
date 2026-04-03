@@ -26,6 +26,7 @@ export const getIndividualsLeaderboard = async (req, res) => {
     let endDate = qEnd ? new Date(qEnd) : new Date("2026-04-30T23:59:59Z");
 
     const now = new Date();
+    const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     // Clamp today to end of challenge if it's past it
     const challengeEnd = new Date("2026-04-30T23:59:59Z");
     const today = now > challengeEnd ? challengeEnd : now;
@@ -58,29 +59,43 @@ export const getIndividualsLeaderboard = async (req, res) => {
     };
 
 
+    const nowTime = new Date();
+    const last24hTime = new Date(nowTime.getTime() - 24 * 60 * 60 * 1000);
+
     // F. Apply Pagination (Starting from USER to include 0km people)
     const leaderboard = await User.aggregate([
-      // 1. Join with activities to sum them up
       {
         $lookup: {
           from: "activities",
           localField: "_id",
           foreignField: "userId",
-          pipeline: [
-            { $match: matchQuery } // Sum only 'isValid' and 'dated' activities
-          ],
+          pipeline: [{ $match: matchQuery }],
           as: "validActivities"
         }
       },
-      // 2. Calculate totals per user
       {
         $addFields: {
-          distance: { $sum: "$validActivities.distance" },
+          totalDistance: { $sum: "$validActivities.distance" },
           totalMovingTime: { $sum: "$validActivities.movingTime" },
-          activitiesCount: { $size: "$validActivities" }
+          activitiesCount: { $size: "$validActivities" },
+          // Tính quãng đường trong 24h qua (đơn vị: meters)
+          distance24h: {
+            $sum: {
+              $map: {
+                input: {
+                  $filter: {
+                    input: "$validActivities",
+                    as: "act",
+                    cond: { $gte: ["$$act.startDate", last24hTime] }
+                  }
+                },
+                as: "recent",
+                in: "$$recent.distance"
+              }
+            }
+          }
         }
       },
-      // 3. Project standard leaderboard fields
       {
         $project: {
           _id: 0,
@@ -91,7 +106,8 @@ export const getIndividualsLeaderboard = async (req, res) => {
           location: 1,
           teamName: 1,
           gender: 1,
-          distance: { $divide: ["$distance", 1000] },
+          distance: { $divide: ["$totalDistance", 1000] },
+          trend: { $divide: ["$distance24h", 1000] },
           totalMovingTime: 1,
           activitiesCount: 1
         }
@@ -101,12 +117,11 @@ export const getIndividualsLeaderboard = async (req, res) => {
       { $limit: limit }
     ]);
 
-    // G. Total Count for pagination meta (Total Users)
+    // G. Total Count for pagination meta
     const total = await User.countDocuments({});
 
     // H. Add ranks and format details
     const rankedLeaderboard = leaderboard.map((item, index) => {
-      // Tính toán PACE TRUNG BÌNH (Pace = totalMovingTime / distanceKm)
       let paceStr = "0:00";
       if (item.distance > 0 && item.totalMovingTime > 0) {
         const paceTotalSeconds = item.totalMovingTime / item.distance;
@@ -119,7 +134,7 @@ export const getIndividualsLeaderboard = async (req, res) => {
         rank: skip + index + 1,
         ...item,
         name: (item.name || "").trim(),
-        pace: paceStr // Trả về Pace ở đây
+        pace: paceStr
       };
     });
 

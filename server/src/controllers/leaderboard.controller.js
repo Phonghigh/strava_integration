@@ -29,54 +29,51 @@ export const getIndividualsLeaderboard = async (req, res) => {
       if (endDate) matchQuery.startDate.$lte = new Date(endDate);
     }
 
-    // F. Apply Pagination
-    const leaderboard = await Activity.aggregate([
-      { $match: matchQuery },
-      {
-        $group: {
-          _id: "$userId",
-          distance: { $sum: "$distance" },
-          totalMovingTime: { $sum: "$movingTime" },
-          activitiesCount: { $sum: 1 }
-        }
-      },
+    // F. Apply Pagination (Starting from USER to include 0km people)
+    const leaderboard = await User.aggregate([
+      // 1. Join with activities to sum them up
       {
         $lookup: {
-          from: "users",
+          from: "activities",
           localField: "_id",
-          foreignField: "_id",
-          as: "athlete"
+          foreignField: "userId",
+          pipeline: [
+            { $match: matchQuery } // Sum only 'isValid' and 'dated' activities
+          ],
+          as: "validActivities"
         }
       },
-      { $unwind: "$athlete" },
+      // 2. Calculate totals per user
+      {
+        $addFields: {
+          distance: { $sum: "$validActivities.distance" },
+          totalMovingTime: { $sum: "$validActivities.movingTime" },
+          activitiesCount: { $size: "$validActivities" }
+        }
+      },
+      // 3. Project standard leaderboard fields
       {
         $project: {
           _id: 0,
           userId: "$_id",
-          stravaId: "$athlete.stravaId",
-          name: { $concat: ["$athlete.firstName", " ", "$athlete.lastName"] },
-          avatar: "$athlete.profile",
-          location: "$athlete.location",
-          teamName: "$athlete.teamName",
-          gender: "$athlete.gender",
+          stravaId: 1,
+          name: { $concat: [{ $ifNull: ["$firstName", ""] }, " ", { $ifNull: ["$lastName", ""] }] },
+          avatar: "$profile",
+          location: 1,
+          teamName: 1,
+          gender: 1,
           distance: { $divide: ["$distance", 1000] },
           totalMovingTime: 1,
           activitiesCount: 1
         }
       },
-      { $sort: { distance: -1 } },
+      { $sort: { distance: -1, name: 1 } },
       { $skip: skip },
       { $limit: limit }
     ]);
 
-    // G. Total Count for pagination meta
-    const totalCountResult = await Activity.aggregate([
-      { $match: matchQuery },
-      { $group: { _id: "$userId" } },
-      { $count: "total" }
-    ]);
-
-    const total = totalCountResult[0]?.total || 0;
+    // G. Total Count for pagination meta (Total Users)
+    const total = await User.countDocuments({});
 
     // H. Add ranks and format details
     const rankedLeaderboard = leaderboard.map((item, index) => {

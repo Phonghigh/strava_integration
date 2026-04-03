@@ -21,11 +21,9 @@ export const getIndividualsLeaderboard = async (req, res) => {
       if (endDate) matchQuery.startDate.$lte = new Date(endDate);
     }
 
+    // F. Apply Pagination
     const leaderboard = await Activity.aggregate([
-      // A. Filter by validity and date range
       { $match: matchQuery },
-      
-      // B. Group by user
       {
         $group: {
           _id: "$userId",
@@ -33,7 +31,6 @@ export const getIndividualsLeaderboard = async (req, res) => {
           activitiesCount: { $sum: 1 }
         }
       },
-      // C. Lookup User details
       {
         $lookup: {
           from: "users",
@@ -43,35 +40,47 @@ export const getIndividualsLeaderboard = async (req, res) => {
         }
       },
       { $unwind: "$athlete" },
-      
-      // D. Clean up format per specification
       {
         $project: {
           _id: 0,
           userId: "$_id",
           name: { $concat: ["$athlete.firstName", " ", "$athlete.lastName"] },
           avatar: "$athlete.profile",
-          location: "$athlete.location", // Added location to leaderboard
-          distance: { $divide: ["$distance", 1000] }, // Convert to Km
+          location: "$athlete.location",
+          distance: { $divide: ["$distance", 1000] },
           activitiesCount: 1
         }
       },
-      // E. Sort by Highest Distance
       { $sort: { distance: -1 } },
-      
-      // F. Apply Pagination
       { $skip: skip },
       { $limit: limit }
     ]);
 
-    // To add ranks locally in JS:
+    // G. Total Count for pagination meta
+    const totalCountResult = await Activity.aggregate([
+      { $match: matchQuery },
+      { $group: { _id: "$userId" } },
+      { $count: "total" }
+    ]);
+
+    const total = totalCountResult[0]?.total || 0;
+
+    // H. Add ranks locally in JS
     const rankedLeaderboard = leaderboard.map((item, index) => ({
       rank: skip + index + 1,
       ...item,
-      name: item.name.trim()
+      name: (item.name || "").trim()
     }));
 
-    res.json(rankedLeaderboard);
+    res.json({
+      data: rankedLeaderboard,
+      meta: {
+        total,
+        totalPages: Math.ceil(total / limit),
+        currentPage: page,
+        limit
+      }
+    });
   } catch (err) {
     console.error("[Individuals Leaderboard Error]:", err.message);
     res.status(500).json({ error: "Failed to fetch leaderboard" });
@@ -95,26 +104,22 @@ export const getTeamLeaderboard = async (req, res) => {
       if (endDate) matchQuery.startDate.$lte = new Date(endDate);
     }
 
+    // Execute Team Leaderboard aggregation
     const teamsData = await User.aggregate([
-      // Lookup Valid Activities for each user
       {
         $lookup: {
           from: "activities",
           localField: "_id",
           foreignField: "userId",
-          pipeline: [
-            { $match: matchQuery }
-          ],
+          pipeline: [{ $match: matchQuery }],
           as: "userActivities"
         }
       },
-      // Calculate total distance for this user implicitly
       {
         $addFields: {
           userTotalDistance: { $sum: "$userActivities.distance" }
         }
       },
-      // Group by teamName
       {
         $group: {
           _id: "$teamName", 
@@ -122,21 +127,26 @@ export const getTeamLeaderboard = async (req, res) => {
           memberCount: { $sum: 1 }
         }
       },
-      // Format output
       {
         $project: {
           _id: 0,
           teamId: { $ifNull: ["$_id", "No Team"] }, 
-          totalDistance: { $divide: ["$totalDistance", 1000] }, // To Km
+          totalDistance: { $divide: ["$totalDistance", 1000] },
           memberCount: 1
         }
       },
-      // Sort highest team distance first
       { $sort: { totalDistance: -1 } },
-      
       { $skip: skip },
       { $limit: limit }
     ]);
+
+    // Calculate total teams for metadata
+    const totalTeamsResult = await User.aggregate([
+      { $group: { _id: "$teamName" } },
+      { $count: "total" }
+    ]);
+
+    const total = totalTeamsResult[0]?.total || 0;
 
     const rankedTeams = teamsData.map((item, index) => ({
       rank: skip + index + 1,
@@ -144,7 +154,15 @@ export const getTeamLeaderboard = async (req, res) => {
       ...item
     }));
 
-    res.json(rankedTeams);
+    res.json({
+      data: rankedTeams,
+      meta: {
+        total,
+        totalPages: Math.ceil(total / limit),
+        currentPage: page,
+        limit
+      }
+    });
   } catch (err) {
     console.error("[Team Leaderboard Error]:", err.message);
     res.status(500).json({ error: "Failed to fetch team leaderboard" });

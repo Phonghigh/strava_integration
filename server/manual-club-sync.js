@@ -13,16 +13,18 @@ async function run() {
 
     const args = process.argv.slice(2);
     const phaseArg = args.find(a => a.startsWith('--phase=') || a.startsWith('-p='));
-    let options = { runPhase1: true, runPhase2: true };
+    const fullSync = args.includes('--full');
+    
+    let options = { runPhase1: true, runPhase2: true, fullSync: fullSync };
 
     if (phaseArg) {
       const val = phaseArg.split('=')[1];
-      if (val === '1') options = { runPhase1: true, runPhase2: false };
-      if (val === '2') options = { runPhase1: false, runPhase2: true };
+      if (val === '1') options = { runPhase1: true, runPhase2: false, fullSync };
+      if (val === '2') options = { runPhase1: false, runPhase2: true, fullSync };
     }
 
     console.log("--------------------------------------------------");
-    console.log(`Starting Club Sync - Phase ${phaseArg ? phaseArg.split('=')[1] : "Full"}...`);
+    console.log(`Starting Club Sync - Phase ${phaseArg ? phaseArg.split('=')[1] : "Full"} (Mode: ${fullSync ? "FULL" : "Incremental"})...`);
     console.log("--------------------------------------------------");
     
     const startTime = Date.now();

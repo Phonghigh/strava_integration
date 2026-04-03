@@ -99,7 +99,7 @@ export const syncClubData = async (options = { runPhase1: true, runPhase2: true 
   // 2. Scrape activities for the whole club (Unified Discovery)
   if (options.runPhase2) {
     console.log(`[Sync] Phase 2: Scraping recent club activity feed...`);
-    const clubActs = await scrapeClubActivities(clubId);
+    const clubActs = await scrapeClubActivities(clubId, options.fullSync);
     clubFeedSynced = clubActs.length;
   }
 

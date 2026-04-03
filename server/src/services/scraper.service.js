@@ -58,7 +58,6 @@ export const scrapeClubMembers = async (clubId) => {
     while (hasNextPage) {
       console.log(`[Scraper] Processing Page ${pageCount}...`);
 
-      // Extract members based on the provided HTML structure
       const members = await page.evaluate(() => {
         const items = Array.from(document.querySelectorAll('ul.list-athletes li'));
         return items.map(item => {
@@ -81,41 +80,46 @@ export const scrapeClubMembers = async (clubId) => {
         }).filter(m => m !== null);
       });
 
-      console.log(`[Scraper] Page ${pageCount}: Found ${members.length} members.`);
+      console.log(`[Scraper] Page ${pageCount}: Found ${members.length} members. Updating DB...`);
 
-      // Save/Update in DB
-      for (const member of members) {
-        await User.findOneAndUpdate(
-          { stravaId: member.stravaId },
-          { 
-            firstName: member.name.split(' ')[0],
-            lastName: member.name.split(' ').slice(1).join(' '),
-            profile: member.profile,
-            location: member.location, // New field
-          },
-          { upsert: true, new: true }
-        );
+      // Performance Optimization: Use bulkWrite instead of individual findOneAndUpdate
+      if (members.length > 0) {
+        const bulkOps = members.map(member => ({
+          updateOne: {
+            filter: { stravaId: member.stravaId },
+            update: { 
+              firstName: member.name.split(' ')[0],
+              lastName: member.name.split(' ').slice(1).join(' '),
+              profile: member.profile,
+              location: member.location,
+            },
+            upsert: true
+          }
+        }));
+        await User.bulkWrite(bulkOps);
+        console.log(`[Scraper] Page ${pageCount}: DB batch update complete.`);
       }
       
       totalScraped += members.length;
 
       // Check for pagination
+      console.log(`[Scraper] Page ${pageCount}: Checking for next page button...`);
       const nextButton = await page.$('ul.pagination li.next_page a[rel="next"]');
+      
       if (nextButton) {
         const nextPageUrl = await page.evaluate(el => el.href, nextButton);
-        console.log(`[Scraper] Moving to next page: ${nextPageUrl}`);
+        console.log(`[Scraper] Page ${pageCount}: Moving to next page: ${nextPageUrl.split('/').pop()}`);
         pageCount++;
         
-        // Navigate and wait for content instead of network idle
-        await page.goto(nextPageUrl, { waitUntil: 'domcontentloaded' });
+        await page.goto(nextPageUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
         try {
-          await page.waitForSelector('ul.list-athletes li', { timeout: 15000 });
+          await page.waitForSelector('ul.list-athletes li', { timeout: 10000 });
         } catch (e) {
-          console.log(`[Scraper] Warning: Timeout waiting for members list on page ${pageCount}. Continuing...`);
+          console.log(`[Scraper] Warning: Small timeout on page ${pageCount}.`);
         }
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Respectful delay
+        await new Promise(resolve => setTimeout(resolve, 2000));
       } else {
-        console.log(`[Scraper] No more pages found.`);
+        console.log(`[Scraper] No more pages found. Member sync finished.`);
         hasNextPage = false;
       }
     }
@@ -141,62 +145,58 @@ export const scrapeClubActivities = async (clubId) => {
 
     let activities = [];
 
-    // Listener to catch the JSON response from Strava's internal feed API
     page.on('response', async (response) => {
       const url = response.url();
       if (url.includes('feed') && url.includes('club_id') && response.status() === 200) {
         try {
-          console.log(`[Network] Intercepted feed packet: ${url.substring(0, 100)}...`);
           const data = await response.json();
           if (data && data.entries) {
-            console.log(`[Network] Found ${data.entries.length} entries in this packet.`);
+            console.log(`[Network] Found ${data.entries.length} entries in packet.`);
             activities.push(...data.entries);
           }
-        } catch (e) {
-          // Response might not be JSON
-        }
+        } catch (e) {}
       }
     });
 
     console.log(`[Scraper] Triggering activities feed for club ${clubId}...`);
-    // Direct navigation to the recent activity tab for better reliability
+    // Optimize viewport for lazy loading
+    await page.setViewport({ width: 1280, height: 2000 });
+
     await page.goto(`https://www.strava.com/clubs/${clubId}/recent_activity`, { 
-      waitUntil: 'networkidle2' 
+      waitUntil: 'networkidle2',
+      timeout: 60000
     });
 
-    // Set the target threshold date (April 1st, 2026)
     const TARGET_DATE = new Date('2026-04-01T00:00:00Z');
     let reachedTargetDate = false;
     let scrollCount = 0;
-    
-    // Track seen IDs during this session to avoid redundant DB checks
-    const checkedInSession = new Set();
-
-    // Scroll loop until we reach the target date (April 1st, 2026) or find already synced data
     let lastHeight = await page.evaluate('document.body.scrollHeight');
     let stagnantCount = 0;
+    
+    // Safety check for session
+    const checkedInSession = new Set();
 
     while (!reachedTargetDate) {
-        console.log(`[Scraper] Precise scrolling (Step ${scrollCount + 1}). Total captured: ${activities.length}`);
+        console.log(`[Scraper] Precise scrolling (Step ${scrollCount + 1}). Captured: ${activities.length}`);
         
-        // --- IMPROVED SCROLL LOGIC ---
-        // 1. Scroll to the absolute bottom of the current rendered page
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        // --- STUTTER SCROLL LOGIC ---
+        // 1. Move down
+        await page.evaluate(() => window.scrollBy(0, 1500));
+        await new Promise(r => setTimeout(r, 800));
         
-        // 2. Add some "jitter" scrolling to trigger the intersection observer
-        await page.evaluate(() => window.scrollBy(0, -150)); 
+        // 2. "Stutter" (Scroll up slightly to trigger observers)
+        await page.evaluate(() => window.scrollBy(0, -500));
         await new Promise(r => setTimeout(r, 400));
-        await page.evaluate(() => window.scrollBy(0, 200));
-
-        // 3. Wait for the infinite scroll to trigger and load content
-        await new Promise(r => setTimeout(r, 2500));
         
-        // 4. Check if page height increased
+        // 3. Move down again to absolute bottom
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await new Promise(r => setTimeout(r, 5000)); // Longer wait for network
+        
         const newHeight = await page.evaluate('document.body.scrollHeight');
-        if (newHeight === lastHeight) {
+        if (newHeight <= lastHeight + 10) {
             stagnantCount++;
-            if (stagnantCount > 5) {
-                console.log(`[Scraper] Page height stagnant for 5 steps. End of feed reached.`);
+            if (stagnantCount > 25) { 
+                console.log(`[Scraper] Page height stagnant for 25 steps. Stopping.`);
                 break;
             }
         } else {
@@ -206,10 +206,9 @@ export const scrapeClubActivities = async (clubId) => {
 
         scrollCount++;
 
-        // --- EARLY STOP OPTIMIZATION: Check if we hit already synced items ---
+        // --- EARLY STOP OPTIMIZATION (DB existence check) ---
         if (activities.length > 0) {
             // Take the last 20 captured activities to check existence in DB
-            // (We check a batch to ensure we didn't just hit a single random already-synced item)
             const recentActIds = activities
                 .filter(entry => entry.activity && !checkedInSession.has(entry.activity.id))
                 .slice(-20)
@@ -220,117 +219,141 @@ export const scrapeClubActivities = async (clubId) => {
                     stravaId: { $in: recentActIds } 
                 });
 
-                if (existingCount > 5) { // If more than 5 in this batch are already synced, we can stop
-                    console.log(`[Scraper] Found ${existingCount} already synced activities in recent batch. Stopping scroll.`);
+                if (existingCount > 5) { // If more than 5 in this batch are already synced, we stop
+                    console.log(`[Scraper] Found ${existingCount} already synced activities. Stopping.`);
                     reachedTargetDate = true;
                     break; 
                 }
-                
-                // Add to checked cache so we don't query DB for these same IDs again
                 recentActIds.forEach(id => checkedInSession.add(id));
             }
 
             // Check if we passed the absolute hard-limit target date
             const lastActivityEntry = [...activities].reverse().find(entry => entry.activity);
             const lastAct = lastActivityEntry?.activity;
-
             if (lastAct && lastAct.startDate) {
                 const lastDate = new Date(lastAct.startDate);
                 if (lastDate < TARGET_DATE) {
-                    console.log(`[Scraper] Reached absolute target date: ${lastDate.toISOString()}. Stopping.`);
+                    console.log(`[Scraper] Reached target date: ${lastDate.toISOString()}. Stopping.`);
                     reachedTargetDate = true;
                 }
             }
         }
         
-        // Safety break
         if (scrollCount > 150) break;
     }
 
-    // Deduplicate and filter by date
     const uniqueEntries = Array.from(new Map(
         activities
           .filter(entry => entry.activity)
-          .map(entry => [entry.activity.id, entry])
+          .map(entry => [entry.activity.id.toString(), entry])
     ).values());
 
-    console.log(`[Scraper] Processing ${uniqueEntries.length} unique activities after deduplication.`);
+    console.log(`[Scraper] Processing ${uniqueEntries.length} unique activities.`);
 
-    // Map and save to DB
+    // Performance Optimization: Fetch all users once to avoid redundant DB queries in the loop
+    const allUsers = await User.find({});
+    const userByStravaId = new Map(allUsers.filter(u => u.stravaId).map(u => [u.stravaId, u]));
+    
+    // Create a mapping for name-based lookup (case-insensitive)
+    const userByName = new Map(allUsers.map(u => {
+        const fullName = `${u.firstName} ${u.lastName || ''}`.trim().toLowerCase();
+        return [fullName, u];
+    }));
+
     for (const entry of uniqueEntries) {
         const act = entry.activity;
         const actDate = new Date(act.startDate);
-        if (actDate < TARGET_DATE) continue; // Skip if older than April 1st
-        
+        if (actDate < TARGET_DATE) continue;
         if (act.type !== 'Run') continue;
 
-        // Priority 1: activity.athlete (Targeting athleteId and athleteName from Strava JSON)
         const athleteId = (act.athlete?.athleteId || act.athlete?.id || entry.athleteId)?.toString();
         const fullName = (act.athlete?.athleteName || act.athlete?.name || entry.athleteName || "").trim();
         
-        console.log(`[Link Audit] Processing activity "${act.activityName || act.name}" by athlete: "${fullName}" (ID: ${athleteId})`);
-
         let userId = null;
+        let matchedUser = null;
 
         // Try linking by ID first (Most precise)
-        if (athleteId) {
-          const user = await User.findOne({ stravaId: athleteId });
-          if (user) userId = user._id;
-        }
-
-        // FALLBACK: Link by Name (More flexible)
-        if (!userId && fullName) {
-           // Try exact full name match first (case-insensitive)
-           const users = await User.find({}); 
-           const matchedUser = users.find(u => {
-              const dbFullName = `${u.firstName} ${u.lastName || ''}`.trim();
-              return dbFullName.toLowerCase() === fullName.toLowerCase();
-           });
-
-           if (matchedUser) {
-             userId = matchedUser._id;
-             // Link the stravaId for future
-             if (athleteId && !matchedUser.stravaId) {
+        if (athleteId && userByStravaId.has(athleteId)) {
+            matchedUser = userByStravaId.get(athleteId);
+        } 
+        // FALLBACK: Link by Name
+        else if (fullName) {
+            matchedUser = userByName.get(fullName.toLowerCase());
+            
+            // If matched by name, link the stravaId for future syncs
+            if (matchedUser && athleteId && !matchedUser.stravaId) {
                 matchedUser.stravaId = athleteId;
                 await matchedUser.save();
-             }
-           } else {
-             console.log(`[Link Warning] Could not match activity owner: "${fullName}" (ID: ${athleteId})`);
-           }
-        }
-
-        // Improved Distance Extraction: Look for the stat whose subtitle is "Distance"
-        let distanceMeters = 0;
-        const stats = act.stats || [];
-        const distanceSubtitleIndex = stats.findIndex(s => s.value === 'Distance');
-        
-        if (distanceSubtitleIndex !== -1 && distanceSubtitleIndex > 0) {
-            // The value is usually in the element just before the subtitle
-            let rawValue = stats[distanceSubtitleIndex - 1].value || "0";
-            // Remove HTML tags like <abbr>...
-            const cleanValue = rawValue.replace(/<[^>]*>/g, '').trim();
-            
-            if (cleanValue.toLowerCase().includes('km')) {
-                distanceMeters = parseFloat(cleanValue) * 1000;
-            } else {
-                distanceMeters = parseFloat(cleanValue);
+                // Update our local cache
+                userByStravaId.set(athleteId, matchedUser);
             }
         }
 
-        // Extract run location (e.g. "Phường Phước Vĩnh, Thừa Thiên Huế Province")
+        if (matchedUser) userId = matchedUser._id;
+         // Data Extraction (Pace & Moving Time)
+        let distanceMeters = 0;
+        let pace = "-";
+        let movingTimeSeconds = 0;
+        const stats = act.stats || [];
+        
+        const distanceSubtitleIndex = stats.findIndex(s => s.value === 'Distance');
+        if (distanceSubtitleIndex !== -1 && distanceSubtitleIndex > 0) {
+            const rawValue = stats[distanceSubtitleIndex - 1].value || "0";
+            const cleanValue = rawValue.replace(/<[^>]*>/g, '').trim();
+            distanceMeters = cleanValue.toLowerCase().includes('km') ? parseFloat(cleanValue) * 1000 : parseFloat(cleanValue);
+        }
+
+        const paceSubtitleIndex = stats.findIndex(s => s.value === 'Pace');
+        if (paceSubtitleIndex !== -1 && paceSubtitleIndex > 0) {
+            const rawValue = stats[paceSubtitleIndex - 1].value || "";
+            pace = rawValue.replace(/<[^>]*>/g, '').replace('/km', '').trim();
+        }
+
+        const timeSubtitleIndex = stats.findIndex(s => s.value === 'Time');
+        if (timeSubtitleIndex !== -1 && timeSubtitleIndex > 0) {
+            const rawValue = stats[timeSubtitleIndex - 1].value || "";
+            const cleanTime = rawValue.replace(/<[^>]*>/g, '').trim();
+            const hMatch = cleanTime.match(/(\d+)h/);
+            const mMatch = cleanTime.match(/(\d+)m/);
+            const sMatch = cleanTime.match(/(\d+)s/);
+            movingTimeSeconds = (hMatch ? parseInt(hMatch[1]) * 3600 : 0) + 
+                                (mMatch ? parseInt(mMatch[1]) * 60 : 0) + 
+                                (sMatch ? parseInt(sMatch[1]) : 0);
+        }
+
         const runLocation = act.timeAndLocation?.location || act.timeAndLocation?.displayLocation || '';
+
+        // --- VALIDATION RULES ---
+        // 1. Type must be 'Run'
+        const isTypeValid = act.type === 'Run';
+        
+        // 2. Distance >= 1.0 km (1000 meters)
+        const isDistanceValid = distanceMeters >= 1000;
+        
+        // 3. Pace 4:00 - 15:00 /km
+        let isPaceValid = false;
+        if (pace !== "-") {
+            const [min, sec] = pace.split(':').map(val => parseInt(val) || 0);
+            const totalPaceSeconds = (min * 60) + sec;
+            // 4:00 = 240s, 15:00 = 900s
+            isPaceValid = totalPaceSeconds >= 240 && totalPaceSeconds <= 900;
+        }
+
+        const isActivityValid = isTypeValid && isDistanceValid && isPaceValid;
 
         await Activity.findOneAndUpdate(
           { stravaId: act.id.toString() },
           {
-            userId: userId,
+            userId,
             athleteName: act.athlete?.name,
             name: act.activityName,
             distance: distanceMeters,
-            location: runLocation, // New field
+            movingTime: movingTimeSeconds,
+            pace,
+            location: runLocation,
             type: act.type,
             startDate: act.startDate,
-            isValid: true 
+            isValid: isActivityValid 
           },
           { upsert: true }
         );

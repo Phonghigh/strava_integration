@@ -36,6 +36,7 @@ export const getIndividualsLeaderboard = async (req, res) => {
         $group: {
           _id: "$userId",
           distance: { $sum: "$distance" },
+          totalMovingTime: { $sum: "$movingTime" },
           activitiesCount: { $sum: 1 }
         }
       },
@@ -56,9 +57,10 @@ export const getIndividualsLeaderboard = async (req, res) => {
           name: { $concat: ["$athlete.firstName", " ", "$athlete.lastName"] },
           avatar: "$athlete.profile",
           location: "$athlete.location",
-          teamName: "$athlete.teamName", // Thêm thông tin Team
-          gender: "$athlete.gender",     // Thêm thông tin Giới tính
+          teamName: "$athlete.teamName",
+          gender: "$athlete.gender",
           distance: { $divide: ["$distance", 1000] },
+          totalMovingTime: 1,
           activitiesCount: 1
         }
       },
@@ -76,12 +78,24 @@ export const getIndividualsLeaderboard = async (req, res) => {
 
     const total = totalCountResult[0]?.total || 0;
 
-    // H. Add ranks locally in JS
-    const rankedLeaderboard = leaderboard.map((item, index) => ({
-      rank: skip + index + 1,
-      ...item,
-      name: (item.name || "").trim()
-    }));
+    // H. Add ranks and format details
+    const rankedLeaderboard = leaderboard.map((item, index) => {
+      // Tính toán PACE TRUNG BÌNH (Pace = totalMovingTime / distanceKm)
+      let paceStr = "0:00";
+      if (item.distance > 0 && item.totalMovingTime > 0) {
+        const paceTotalSeconds = item.totalMovingTime / item.distance;
+        const mins = Math.floor(paceTotalSeconds / 60);
+        const secs = Math.floor(paceTotalSeconds % 60);
+        paceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+      }
+
+      return {
+        rank: skip + index + 1,
+        ...item,
+        name: (item.name || "").trim(),
+        pace: paceStr // Trả về Pace ở đây
+      };
+    });
 
     res.json({
       meta: {

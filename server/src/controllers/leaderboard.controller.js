@@ -12,10 +12,18 @@ export const getIndividualsLeaderboard = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
     const skip = (page - 1) * limit;
+    const { startDate, endDate } = req.query;
+
+    const matchQuery = { isValid: true };
+    if (startDate || endDate) {
+      matchQuery.startDate = {};
+      if (startDate) matchQuery.startDate.$gte = new Date(startDate);
+      if (endDate) matchQuery.startDate.$lte = new Date(endDate);
+    }
 
     const leaderboard = await Activity.aggregate([
-      // A. Only valid activities count towards the leaderboard
-      { $match: { isValid: true } },
+      // A. Filter by validity and date range
+      { $match: matchQuery },
       
       // B. Group by user
       {
@@ -78,6 +86,14 @@ export const getTeamLeaderboard = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
+    const { startDate, endDate } = req.query;
+
+    const matchQuery = { isValid: true };
+    if (startDate || endDate) {
+      matchQuery.startDate = {};
+      if (startDate) matchQuery.startDate.$gte = new Date(startDate);
+      if (endDate) matchQuery.startDate.$lte = new Date(endDate);
+    }
 
     const teamsData = await User.aggregate([
       // Lookup Valid Activities for each user
@@ -87,7 +103,7 @@ export const getTeamLeaderboard = async (req, res) => {
           localField: "_id",
           foreignField: "userId",
           pipeline: [
-            { $match: { isValid: true } }
+            { $match: matchQuery }
           ],
           as: "userActivities"
         }

@@ -12,7 +12,7 @@ export const connectDB = async () => {
   }
 
   const opts = {
-    bufferCommands: false, // Prevents queries from hanging if not connected
+    bufferCommands: true, // Allow waiting for connection
     serverSelectionTimeoutMS: 5000, // Fails fast instead of timing out at 10s
   };
 

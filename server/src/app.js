@@ -10,7 +10,7 @@ import { connectDB } from "./db/connect.js";
 dotenv.config();
 
 // Connect to MongoDB
-connectDB();
+await connectDB();
 
 const app = express();
 

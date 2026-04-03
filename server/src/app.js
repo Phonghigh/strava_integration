@@ -18,13 +18,19 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:8080",
   "http://localhost:8081",
-  process.env.FRONTEND_URL // Thêm link Vercel của bạn
-].filter(Boolean); // Lọc bỏ nếu frontend_url bị trống
+  "https://vietseedsrun.vercel.app",
+  process.env.FRONTEND_URL
+].filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Cho phép tất cả các nguồn hoặc nguồn trong whitelist
-    if (!origin || allowedOrigins.includes(origin) || origin.includes("localhost")) {
+    // Allow if no origin (like mobile apps/curly), OR in whitelist, OR localhost, OR any vercel.app subdomain
+    if (
+      !origin || 
+      allowedOrigins.includes(origin) || 
+      origin.includes("localhost") ||
+      origin.endsWith(".vercel.app")
+    ) {
       callback(null, true);
     } else {
       callback(new Error("Not allowed by CORS"));

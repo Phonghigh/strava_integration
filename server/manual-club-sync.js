@@ -37,12 +37,16 @@ async function run() {
     console.log("Club Feed Items Catch: " + result.clubFeedSynced);
     console.log("--------------------------------------------------");
 
+    console.log("Closing DB connection...");
+    await Promise.race([
+      mongoose.disconnect(),
+      new Promise(resolve => setTimeout(resolve, 2000))
+    ]);
+    process.exit(0);
   } catch (err) {
     console.error("CRITICAL ERROR during sync:", err);
-  } finally {
-    console.log("Closing DB connection...");
     await mongoose.disconnect();
-    process.exit(0);
+    process.exit(1);
   }
 }
 

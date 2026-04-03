@@ -134,40 +134,93 @@ export const scrapeClubMembers = async (clubId) => {
  * Intercepts and fetches club activities via the internal API.
  */
 export const scrapeClubActivities = async (clubId) => {
+  const TARGET_DATE = new Date('2026-04-01T00:00:00Z');
   const browser = await puppeteer.launch({ 
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'] 
   });
   
+  let activities = [];
   try {
     const page = await browser.newPage();
     await setStravaCookies(page);
 
-    let activities = [];
+    // Disable cache to ensure we catch the fresh initial packet
+    await page.setCacheEnabled(false);
 
     page.on('response', async (response) => {
       const url = response.url();
-      if (url.includes('feed') && url.includes('club_id') && response.status() === 200) {
+      // Broad match for any club feed packet
+      if (url.includes('/feed') && (url.includes('feed_type=club') || url.includes('club_id'))) {
         try {
-          const data = await response.json();
-          if (data && data.entries) {
-            console.log(`[Network] Found ${data.entries.length} entries in packet.`);
-            activities.push(...data.entries);
+          if (response.status() === 200) {
+            console.log(`[Network] Captured Packet: ${url}`);
+            const data = await response.json();
+            if (data && data.entries) {
+              console.log(`[Network] Added ${data.entries.length} entries. Total now: ${activities.length + data.entries.length}`);
+              activities.push(...data.entries);
+            }
+          } else if (response.status() !== 204 && response.status() !== 304) {
+             console.log(`[Network] Info: Observed packet ${url.split('/').pop()} with status ${response.status()}`);
           }
-        } catch (e) {}
+        } catch (e) {
+          // Ignore parsing errors
+        }
       }
     });
-
-    console.log(`[Scraper] Triggering activities feed for club ${clubId}...`);
     // Optimize viewport for lazy loading
     await page.setViewport({ width: 1280, height: 2000 });
 
-    await page.goto(`https://www.strava.com/clubs/${clubId}/recent_activity`, { 
-      waitUntil: 'networkidle2',
-      timeout: 60000
-    });
+    const clubUrl = `https://www.strava.com/clubs/${clubId}/recent_activity`;
+    let success = false;
+    let retries = 0;
+    const maxRetries = 3;
 
-    const TARGET_DATE = new Date('2026-04-01T00:00:00Z');
+    while (!success && retries < maxRetries) {
+      try {
+        console.log(`[Scraper] Accessing club recent activities (Attempt ${retries + 1}/${maxRetries})...`);
+        await page.goto(clubUrl, { 
+          waitUntil: 'networkidle2', 
+          timeout: 90000 // 90 seconds
+        });
+        success = true;
+      } catch (e) {
+        retries++;
+        console.log(`[Scraper] Timeout/Error accessing club page. Retrying in 5s... (${e.message})`);
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+
+    if (!success) {
+      throw new Error(`Failed to load club page after ${maxRetries} attempts.`);
+    }
+
+    // Small delay to ensure interceptor captures the initial packet
+    await new Promise(r => setTimeout(r, 5000));
+
+    // --- GOLDEN SOLUTION: Manually fetch the first packet that Strava hides in HTML ---
+    try {
+        console.log(`[Scraper] Manually fetching the MISSING first packet...`);
+        const firstPacketUrl = `https://www.strava.com/clubs/${clubId}/feed?feed_type=club&club_id=${clubId}`;
+        const firstPacketData = await page.evaluate(async (url) => {
+            try {
+                const response = await fetch(url);
+                return await response.json();
+            } catch (e) {
+                return null;
+            }
+        }, firstPacketUrl);
+
+        if (firstPacketData && firstPacketData.entries) {
+            console.log(`[Scraper] SUCCESSFULLY FETCHED ${firstPacketData.entries.length} missing initial members.`);
+            activities.push(...firstPacketData.entries);
+        } else {
+            console.log(`[Scraper] Failed to fetch initial packet manually. Relying on network...`);
+        }
+    } catch (e) {
+        console.log(`[Scraper] Manual fetch error: ${e.message}`);
+    }
+
     let reachedTargetDate = false;
     let scrollCount = 0;
     let lastHeight = await page.evaluate('document.body.scrollHeight');
@@ -176,29 +229,28 @@ export const scrapeClubActivities = async (clubId) => {
     // Safety check for session
     const checkedInSession = new Set();
 
-    while (!reachedTargetDate) {
+    while (!reachedTargetDate && scrollCount < 150) {
         console.log(`[Scraper] Precise scrolling (Step ${scrollCount + 1}). Captured: ${activities.length}`);
         
-        // --- STUTTER SCROLL LOGIC ---
-        // 1. Move down
         await page.evaluate(() => window.scrollBy(0, 1500));
         await new Promise(r => setTimeout(r, 800));
-        
-        // 2. "Stutter" (Scroll up slightly to trigger observers)
         await page.evaluate(() => window.scrollBy(0, -500));
         await new Promise(r => setTimeout(r, 400));
-        
-        // 3. Move down again to absolute bottom
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await new Promise(r => setTimeout(r, 5000)); // Longer wait for network
+
+        if (stagnantCount > 0 && stagnantCount % 5 === 0) {
+            console.log(`[Scraper] Stagnant steps: ${stagnantCount}. Refreshing position...`);
+            await page.evaluate(() => window.scrollTo(0, 0));
+            await new Promise(r => setTimeout(r, 1000));
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        }
+
+        await new Promise(r => setTimeout(r, 5000));
         
         const newHeight = await page.evaluate('document.body.scrollHeight');
         if (newHeight <= lastHeight + 10) {
             stagnantCount++;
-            if (stagnantCount > 25) { 
-                console.log(`[Scraper] Page height stagnant for 25 steps. Stopping.`);
-                break;
-            }
+            if (stagnantCount > 50) break;
         } else {
             stagnantCount = 0;
             lastHeight = newHeight;
@@ -206,161 +258,134 @@ export const scrapeClubActivities = async (clubId) => {
 
         scrollCount++;
 
-        // --- EARLY STOP OPTIMIZATION (DB existence check) ---
         if (activities.length > 0) {
-            // Take the last 20 captured activities to check existence in DB
-            const recentActIds = activities
-                .filter(entry => entry.activity && !checkedInSession.has(entry.activity.id))
-                .slice(-20)
-                .map(entry => entry.activity.id.toString());
-
-            if (recentActIds.length > 0) {
-                const existingCount = await Activity.countDocuments({ 
-                    stravaId: { $in: recentActIds } 
-                });
-
-                if (existingCount > 5) { // If more than 5 in this batch are already synced, we stop
-                    console.log(`[Scraper] Found ${existingCount} already synced activities. Stopping.`);
-                    reachedTargetDate = true;
-                    break; 
-                }
-                recentActIds.forEach(id => checkedInSession.add(id));
-            }
-
-            // Check if we passed the absolute hard-limit target date
             const lastActivityEntry = [...activities].reverse().find(entry => entry.activity);
-            const lastAct = lastActivityEntry?.activity;
-            if (lastAct && lastAct.startDate) {
-                const lastDate = new Date(lastAct.startDate);
+            if (lastActivityEntry?.activity?.startDate) {
+                const lastDate = new Date(lastActivityEntry.activity.startDate);
                 if (lastDate < TARGET_DATE) {
-                    console.log(`[Scraper] Reached target date: ${lastDate.toISOString()}. Stopping.`);
+                    console.log(`[Scraper] Reached ${lastDate.toISOString()}. Stopping.`);
                     reachedTargetDate = true;
                 }
             }
         }
-        
-        if (scrollCount > 150) break;
     }
-
-    const uniqueEntries = Array.from(new Map(
-        activities
-          .filter(entry => entry.activity)
-          .map(entry => [entry.activity.id.toString(), entry])
-    ).values());
-
-    console.log(`[Scraper] Processing ${uniqueEntries.length} unique activities.`);
-
-    // Performance Optimization: Fetch all users once to avoid redundant DB queries in the loop
-    const allUsers = await User.find({});
-    const userByStravaId = new Map(allUsers.filter(u => u.stravaId).map(u => [u.stravaId, u]));
-    
-    // Create a mapping for name-based lookup (case-insensitive)
-    const userByName = new Map(allUsers.map(u => {
-        const fullName = `${u.firstName} ${u.lastName || ''}`.trim().toLowerCase();
-        return [fullName, u];
-    }));
-
-    for (const entry of uniqueEntries) {
-        const act = entry.activity;
-        const actDate = new Date(act.startDate);
-        if (actDate < TARGET_DATE) continue;
-        if (act.type !== 'Run') continue;
-
-        const athleteId = (act.athlete?.athleteId || act.athlete?.id || entry.athleteId)?.toString();
-        const fullName = (act.athlete?.athleteName || act.athlete?.name || entry.athleteName || "").trim();
-        
-        let userId = null;
-        let matchedUser = null;
-
-        // Try linking by ID first (Most precise)
-        if (athleteId && userByStravaId.has(athleteId)) {
-            matchedUser = userByStravaId.get(athleteId);
-        } 
-        // FALLBACK: Link by Name
-        else if (fullName) {
-            matchedUser = userByName.get(fullName.toLowerCase());
-            
-            // If matched by name, link the stravaId for future syncs
-            if (matchedUser && athleteId && !matchedUser.stravaId) {
-                matchedUser.stravaId = athleteId;
-                await matchedUser.save();
-                // Update our local cache
-                userByStravaId.set(athleteId, matchedUser);
-            }
-        }
-
-        if (matchedUser) userId = matchedUser._id;
-         // Data Extraction (Pace & Moving Time)
-        let distanceMeters = 0;
-        let pace = "-";
-        let movingTimeSeconds = 0;
-        const stats = act.stats || [];
-        
-        const distanceSubtitleIndex = stats.findIndex(s => s.value === 'Distance');
-        if (distanceSubtitleIndex !== -1 && distanceSubtitleIndex > 0) {
-            const rawValue = stats[distanceSubtitleIndex - 1].value || "0";
-            const cleanValue = rawValue.replace(/<[^>]*>/g, '').trim();
-            distanceMeters = cleanValue.toLowerCase().includes('km') ? parseFloat(cleanValue) * 1000 : parseFloat(cleanValue);
-        }
-
-        const paceSubtitleIndex = stats.findIndex(s => s.value === 'Pace');
-        if (paceSubtitleIndex !== -1 && paceSubtitleIndex > 0) {
-            const rawValue = stats[paceSubtitleIndex - 1].value || "";
-            pace = rawValue.replace(/<[^>]*>/g, '').replace('/km', '').trim();
-        }
-
-        const timeSubtitleIndex = stats.findIndex(s => s.value === 'Time');
-        if (timeSubtitleIndex !== -1 && timeSubtitleIndex > 0) {
-            const rawValue = stats[timeSubtitleIndex - 1].value || "";
-            const cleanTime = rawValue.replace(/<[^>]*>/g, '').trim();
-            const hMatch = cleanTime.match(/(\d+)h/);
-            const mMatch = cleanTime.match(/(\d+)m/);
-            const sMatch = cleanTime.match(/(\d+)s/);
-            movingTimeSeconds = (hMatch ? parseInt(hMatch[1]) * 3600 : 0) + 
-                                (mMatch ? parseInt(mMatch[1]) * 60 : 0) + 
-                                (sMatch ? parseInt(sMatch[1]) : 0);
-        }
-
-        const runLocation = act.timeAndLocation?.location || act.timeAndLocation?.displayLocation || '';
-
-        // --- VALIDATION RULES ---
-        // 1. Type must be 'Run'
-        const isTypeValid = act.type === 'Run';
-        
-        // 2. Distance >= 1.0 km (1000 meters)
-        const isDistanceValid = distanceMeters >= 1000;
-        
-        // 3. Pace 4:00 - 15:00 /km
-        let isPaceValid = false;
-        if (pace !== "-") {
-            const [min, sec] = pace.split(':').map(val => parseInt(val) || 0);
-            const totalPaceSeconds = (min * 60) + sec;
-            // 4:00 = 240s, 15:00 = 900s
-            isPaceValid = totalPaceSeconds >= 240 && totalPaceSeconds <= 900;
-        }
-
-        const isActivityValid = isTypeValid && isDistanceValid && isPaceValid;
-
-        await Activity.findOneAndUpdate(
-          { stravaId: act.id.toString() },
-          {
-            userId,
-            athleteName: act.athlete?.name,
-            name: act.activityName,
-            distance: distanceMeters,
-            movingTime: movingTimeSeconds,
-            pace,
-            location: runLocation,
-            type: act.type,
-            startDate: act.startDate,
-            isValid: isActivityValid 
-          },
-          { upsert: true }
-        );
-    }
-
-    return activities;
+  } catch (error) {
+    console.error(`[Scraper] Fatal error:`, error);
+    throw error;
   } finally {
-    await browser.close();
+    if (browser) {
+      try {
+        console.log(`[Scraper] Closing browser...`);
+        const pages = await browser.pages();
+        for (const p of pages) {
+            p.removeAllListeners('response');
+            await p.close().catch(() => {});
+        }
+        await Promise.race([browser.close(), new Promise(r => setTimeout(r, 5000))]);
+        console.log(`[Scraper] Browser closed.`);
+      } catch (e) {}
+    }
   }
+
+  // --- PROCESSING ---
+  const uniqueEntries = Array.from(new Map(
+    activities.filter(entry => entry.activity).map(entry => [entry.activity.id.toString(), entry])
+  ).values());
+
+  console.log(`[Scraper] Processing ${uniqueEntries.length} unique activities...`);
+  
+  const allUsers = await User.find({});
+  const userByStravaId = new Map(allUsers.filter(u => u.stravaId).map(u => [u.stravaId, u]));
+  const userByName = new Map(allUsers.map(u => [`${u.firstName} ${u.lastName || ''}`.trim().toLowerCase(), u]));
+
+  const activityBulkOps = [];
+  const userBulkOps = [];
+  const processedUserIds = new Set();
+  const findDeep = (obj, key) => {
+    if (!obj || typeof obj !== 'object') return null;
+    if (obj[key] !== undefined) return obj[key];
+    for (const k in obj) {
+      const f = findDeep(obj[k], key);
+      if (f !== null) return f;
+    }
+    return null;
+  };
+
+  for (let i = 0; i < uniqueEntries.length; i++) {
+    const entry = uniqueEntries[i];
+    const act = entry.activity;
+    const athleteId = (entry.athleteId || findDeep(entry, 'athleteId'))?.toString();
+    const athleteName = (entry.athleteName || findDeep(entry, 'athleteName') || "Unknown").toString().trim();
+    
+    if (i < 3 || i === uniqueEntries.length - 1 || i % 20 === 0) {
+        console.log(`[Processing] ${i + 1}/${uniqueEntries.length}: "${act.activityName || act.name}" by ${athleteName}`);
+    }
+
+    const actDate = new Date(act.startDate);
+    if (actDate < TARGET_DATE || act.type !== 'Run') continue;
+
+    let matchedUser = userByStravaId.get(athleteId) || userByName.get(athleteName.toLowerCase());
+    let userId = matchedUser ? matchedUser._id : null;
+
+    if (matchedUser && athleteId && !matchedUser.stravaId && !processedUserIds.has(matchedUser._id.toString())) {
+      userBulkOps.push({ updateOne: { filter: { _id: matchedUser._id }, update: { $set: { stravaId: athleteId } } } });
+      processedUserIds.add(matchedUser._id.toString());
+    }
+
+    const stats = act.stats || [];
+    let distanceMeters = 0, pace = "-", movingTimeSeconds = 0;
+
+    const findStat = (key) => {
+      const idx = stats.findIndex(s => s.value === key);
+      return (idx !== -1 && idx > 0) ? (stats[idx - 1].value || "").replace(/<[^>]*>/g, '').trim() : null;
+    };
+
+    const distVal = findStat('Distance');
+    if (distVal) distanceMeters = distVal.toLowerCase().includes('km') ? parseFloat(distVal) * 1000 : parseFloat(distVal);
+    
+    pace = findStat('Pace') || "-";
+    
+    const timeVal = findStat('Time');
+    if (timeVal) {
+      const h = timeVal.match(/(\d+)h/), m = timeVal.match(/(\d+)m/), s = timeVal.match(/(\d+)s/);
+      movingTimeSeconds = (h ? parseInt(h[1]) * 3600 : 0) + (m ? parseInt(m[1]) * 60 : 0) + (s ? parseInt(s[1]) : 0);
+    }
+
+    let isPaceValid = false;
+    if (pace !== "-") {
+      const [m, s] = pace.split(':').map(v => parseInt(v) || 0);
+      const totalS = (m * 60) + s;
+      isPaceValid = totalS >= 240 && totalS <= 900;
+    }
+
+    activityBulkOps.push({
+      updateOne: {
+        filter: { stravaId: act.id.toString() },
+        update: {
+          $set: {
+            userId, athleteName, name: act.activityName, distance: distanceMeters,
+            movingTime: movingTimeSeconds, pace, type: act.type, startDate: act.startDate,
+            isValid: distanceMeters >= 1000 && isPaceValid,
+            location: act.timeAndLocation?.location || act.timeAndLocation?.displayLocation || ''
+          }
+        },
+        upsert: true
+      }
+    });
+  }
+
+  if (userBulkOps.length > 0) {
+    console.time('[DB] Link Users');
+    await User.bulkWrite(userBulkOps);
+    console.timeEnd('[DB] Link Users');
+  }
+
+  if (activityBulkOps.length > 0) {
+    console.time('[DB] Save Activities');
+    const result = await Activity.bulkWrite(activityBulkOps);
+    console.timeEnd('[DB] Save Activities');
+    console.log(`[Scraper] Sync done. Upserted: ${result.upsertedCount}, Modified: ${result.modifiedCount}`);
+  }
+
+  return activities;
 };

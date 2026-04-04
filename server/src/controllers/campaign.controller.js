@@ -114,3 +114,59 @@ export const getCampaignTrend = async (req, res) => {
     });
   }
 };
+
+/**
+ * GET /api/v1/campaign/heatmap
+ * Returns list of members and activities by city/province.
+ */
+export const getCampaignHeatmap = async (req, res) => {
+  try {
+    await connectDB();
+
+    const heatmapData = await User.aggregate([
+      // 1. Only include users with a city defined
+      { $match: { city: { $exists: true, $ne: null, $ne: "" } } },
+      
+      // 2. Lookup valid activities for each user
+      {
+        $lookup: {
+          from: "activities",
+          localField: "_id",
+          foreignField: "userId",
+          pipeline: [{ $match: { isValid: true } }],
+          as: "validActivities"
+        }
+      },
+      
+      // 3. Group by city to count members and their activities
+      {
+        $group: {
+          _id: "$city",
+          members: { $sum: 1 },
+          activities: { $sum: { $size: "$validActivities" } }
+        }
+      },
+      
+      // 4. Project into final format
+      {
+        $project: {
+          _id: 0,
+          province: "$_id",
+          members: 1,
+          activities: 1
+        }
+      },
+      
+      // 5. Sort by member count
+      { $sort: { members: -1 } }
+    ]);
+
+    res.json(heatmapData);
+  } catch (error) {
+    console.error("[Campaign Heatmap Error]:", error);
+    res.status(500).json({ 
+      error: "Failed to fetch heatmap data",
+      message: error.message 
+    });
+  }
+};

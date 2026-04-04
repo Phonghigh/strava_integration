@@ -61,3 +61,66 @@ export const syncActivities = async (req, res) => {
     res.status(500).json({ error: "Sync failed" });
   }
 };
+
+/**
+ * GET /api/v1/activities/recent
+ * Returns global live feed of latest activities.
+ */
+export const getRecentActivities = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+
+    const activities = await Activity.aggregate([
+      // 1. Filter valid only
+      { $match: { isValid: true } },
+      
+      // 2. Latest first
+      { $sort: { startDate: -1 } },
+      
+      // 3. Limit
+      { $limit: limit },
+      
+      // 4. Lookup user details
+      {
+        $lookup: {
+          from: "users",
+          localField: "userId",
+          foreignField: "_id",
+          as: "userDetails"
+        }
+      },
+      
+      // 5. Project final format with fallbacks
+      {
+        $project: {
+          _id: 0,
+          id: "$stravaId",
+          userName: {
+            $let: {
+              vars: { user: { $arrayElemAt: ["$userDetails", 0] } },
+              in: {
+                $ifNull: [
+                  { 
+                    $trim: { 
+                      input: { $concat: [{ $ifNull: ["$$user.firstName", ""] }, " ", { $ifNull: ["$$user.lastName", ""] }] } 
+                    } 
+                  },
+                  "$athleteName"
+                ]
+              }
+            }
+          },
+          userAvatar: { $ifNull: [{ $arrayElemAt: ["$userDetails.profile", 0] }, ""] },
+          distance: { $round: [{ $divide: ["$distance", 1000] }, 1] },
+          location: { $ifNull: ["$location", ""] },
+          createdAt: "$startDate"
+        }
+      }
+    ]);
+
+    res.json(activities);
+  } catch (error) {
+    console.error("[Get Recent Activities Error]", error.message);
+    res.status(500).json({ error: "Failed to fetch recent activities" });
+  }
+};

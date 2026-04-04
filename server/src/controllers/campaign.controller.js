@@ -56,3 +56,55 @@ export const getCampaignStats = async (req, res) => {
     });
   }
 };
+
+/**
+ * GET /api/v1/campaign/trend
+ * Returns list of daily distance from start of campaign to present.
+ */
+export const getCampaignTrend = async (req, res) => {
+  try {
+    await connectDB();
+
+    const campaignStart = new Date("2026-04-01T00:00:00Z");
+    const today = new Date();
+
+    const trendData = await Activity.aggregate([
+      {
+        $match: {
+          isValid: true,
+          startDate: { $gte: campaignStart, $lte: today }
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$startDate", timezone: "+07:00" } },
+          totalDistance: { $sum: "$distance" }
+        }
+      },
+      { $sort: { _id: 1 } },
+      {
+        $project: {
+          _id: 0,
+          date: {
+            $concat: [
+              { $substr: ["$_id", 8, 2] }, // DD
+              "/",
+              { $substr: ["$_id", 5, 2] }  // MM
+            ]
+          },
+          km: { $round: [{ $divide: ["$totalDistance", 1000] }, 1] }
+        }
+      }
+    ]);
+
+    // Fill missing days if needed (optional but good for charts)
+    // For now, return what's in the DB to follow the response sample
+    res.json(trendData);
+  } catch (error) {
+    console.error("[Campaign Trend Error]:", error);
+    res.status(500).json({ 
+      error: "Failed to fetch campaign trend",
+      message: error.message 
+    });
+  }
+};

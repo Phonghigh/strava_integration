@@ -81,25 +81,31 @@ export const getCampaignTrend = async (req, res) => {
           totalDistance: { $sum: "$distance" }
         }
       },
-      { $sort: { _id: 1 } },
-      {
-        $project: {
-          _id: 0,
-          date: {
-            $concat: [
-              { $substr: ["$_id", 8, 2] }, // DD
-              "/",
-              { $substr: ["$_id", 5, 2] }  // MM
-            ]
-          },
-          km: { $round: [{ $divide: ["$totalDistance", 1000] }, 1] }
-        }
-      }
+      { $sort: { _id: 1 } }
     ]);
 
-    // Fill missing days if needed (optional but good for charts)
-    // For now, return what's in the DB to follow the response sample
-    res.json(trendData);
+    // Create a map for easy lookup
+    const dashboardData = new Map(trendData.map(d => [d._id, d.totalDistance]));
+
+    // Fill missing days from start to today
+    const finalTrend = [];
+    let current = new Date(campaignStart);
+    while (current <= today) {
+      const dateStr = current.toISOString().split('T')[0];
+      const totalDist = dashboardData.get(dateStr) || 0;
+      
+      const day = String(current.getDate()).padStart(2, '0');
+      const month = String(current.getMonth() + 1).padStart(2, '0');
+
+      finalTrend.push({
+        date: `${day}/${month}`,
+        km: parseFloat((totalDist / 1000).toFixed(1))
+      });
+      
+      current.setDate(current.getDate() + 1);
+    }
+
+    res.json(finalTrend);
   } catch (error) {
     console.error("[Campaign Trend Error]:", error);
     res.status(500).json({ 

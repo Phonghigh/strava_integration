@@ -111,6 +111,7 @@ export const getRecentActivities = async (req, res) => {
             }
           },
           userAvatar: { $ifNull: [{ $arrayElemAt: ["$userDetails.profile", 0] }, ""] },
+          userId: { $ifNull: [{ $arrayElemAt: ["$userDetails._id", 0] }, null] },
           distance: { $round: [{ $divide: ["$distance", 1000] }, 1] },
           location: { $ifNull: ["$location", ""] },
           createdAt: "$startDate"

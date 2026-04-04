@@ -124,8 +124,15 @@ export const getCampaignHeatmap = async (req, res) => {
     await connectDB();
 
     const heatmapData = await User.aggregate([
-      // 1. Only include users with a city defined
-      { $match: { city: { $exists: true, $ne: null, $ne: "" } } },
+      // 1. Include users with either a city (form) or location (strava)
+      { 
+        $match: { 
+          $or: [
+            { city: { $exists: true, $ne: "" } },
+            { location: { $exists: true, $ne: "" } }
+          ] 
+        } 
+      },
       
       // 2. Lookup valid activities for each user
       {
@@ -138,30 +145,57 @@ export const getCampaignHeatmap = async (req, res) => {
         }
       },
       
-      // 3. Group by city to count members and their activities
+      // 3. Project normalized province, activity count, and total distance
       {
-        $group: {
-          _id: "$city",
-          members: { $sum: 1 },
-          activities: { $sum: { $size: "$validActivities" } }
+        $project: {
+          province: { 
+            $ifNull: [
+              { $cond: [{ $eq: ["$city", ""] }, null, "$city"] }, 
+              "$location"
+            ] 
+          },
+          numActivities: { $size: "$validActivities" },
+          totalKm: { $sum: "$validActivities.distance" }
         }
       },
       
-      // 4. Project into final format
+      // 4. Group by province name (normalized to uppercase)
+      {
+        $group: {
+          _id: { $toUpper: { $trim: { input: "$province" } } },
+          members: { $sum: 1 },
+          activityCount: { $sum: "$numActivities" },
+          totalDistance: { $sum: "$totalKm" }
+        }
+      },
+      
+      // 5. Format response to match frontend Expectations (renaming Km to activities)
       {
         $project: {
           _id: 0,
           province: "$_id",
           members: 1,
-          activities: 1
+          activities: { $round: [{ $divide: ["$totalDistance", 1000] }, 1] }, // Km
+          rawActivityCount: "$activityCount"
         }
       },
       
-      // 5. Sort by member count
-      { $sort: { members: -1 } }
+      // 6. Sort by distance primarily (the new 'activities' field)
+      { $sort: { activities: -1, members: -1 } }
     ]);
 
-    res.json(heatmapData);
+    // Optional post-processing for common names
+    const cleanedData = heatmapData.map(item => {
+      let p = item.province;
+      if (p.includes('HO CHI MINH') || p.includes('HCM')) p = 'TP. HỒ CHÍ MINH';
+      else if (p.includes('HA NOI') || p.includes('HN')) p = 'HÀ NỘI';
+      else if (p.includes('HUE')) p = 'HUẾ';
+      else if (p.includes(', USA')) p = 'USA';
+      
+      return { ...item, province: p };
+    });
+
+    res.json(cleanedData);
   } catch (error) {
     console.error("[Campaign Heatmap Error]:", error);
     res.status(500).json({ 

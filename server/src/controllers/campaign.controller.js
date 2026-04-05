@@ -3,6 +3,7 @@ import { Activity } from "../models/Activity.model.js";
 import { User } from "../models/User.model.js";
 
 import { connectDB } from "../db/connect.js";
+import { normalizeProvince } from "../utils/provinceUtils.js";
 
 /**
  * GET /api/v1/campaign/stats
@@ -118,84 +119,133 @@ export const getCampaignTrend = async (req, res) => {
 /**
  * GET /api/v1/campaign/heatmap
  * Returns list of members and activities by city/province.
+ * Query Params:
+ * - groupBy: "user" (registered city) or "activity" (strava location, default)
+ * - sortBy: "activities" (default) or "members"
  */
 export const getCampaignHeatmap = async (req, res) => {
   try {
     await connectDB();
 
-    const heatmapData = await User.aggregate([
-      // 1. Include users with either a city (form) or location (strava)
-      { 
-        $match: { 
-          $or: [
-            { city: { $exists: true, $ne: "" } },
-            { location: { $exists: true, $ne: "" } }
-          ] 
-        } 
-      },
-      
-      // 2. Lookup valid activities for each user
-      {
-        $lookup: {
-          from: "activities",
-          localField: "_id",
-          foreignField: "userId",
-          pipeline: [{ $match: { isValid: true } }],
-          as: "validActivities"
-        }
-      },
-      
-      // 3. Project normalized province, activity count, and total distance
-      {
-        $project: {
-          province: { 
-            $ifNull: [
-              { $cond: [{ $eq: ["$city", ""] }, null, "$city"] }, 
-              "$location"
-            ] 
-          },
-          numActivities: { $size: "$validActivities" },
-          totalKm: { $sum: "$validActivities.distance" }
-        }
-      },
-      
-      // 4. Group by province name (normalized to uppercase)
-      {
-        $group: {
-          _id: { $toUpper: { $trim: { input: "$province" } } },
-          members: { $sum: 1 },
-          activityCount: { $sum: "$numActivities" },
-          totalDistance: { $sum: "$totalKm" }
-        }
-      },
-      
-      // 5. Format response to match frontend Expectations (renaming Km to activities)
-      {
-        $project: {
-          _id: 0,
-          province: "$_id",
-          members: 1,
-          activities: { $round: [{ $divide: ["$totalDistance", 1000] }, 1] }, // Km
-          rawActivityCount: "$activityCount"
-        }
-      },
-      
-      // 6. Sort by distance primarily (the new 'activities' field)
-      { $sort: { activities: -1, members: -1 } }
-    ]);
+    const { groupBy = 'activity', sortBy = 'activities' } = req.query;
+    let heatmapData = [];
 
-    // Optional post-processing for common names
-    const cleanedData = heatmapData.map(item => {
-      let p = item.province;
-      if (p.includes('HO CHI MINH') || p.includes('HCM')) p = 'TP. HỒ CHÍ MINH';
-      else if (p.includes('HA NOI') || p.includes('HN')) p = 'HÀ NỘI';
-      else if (p.includes('HUE')) p = 'HUẾ';
-      else if (p.includes(', USA')) p = 'USA';
+    if (groupBy === 'user') {
+      // MODE 1: Group by User's registered location
+      heatmapData = await User.aggregate([
+        { 
+          $match: { 
+            $or: [
+              { city: { $exists: true, $ne: "" } },
+              { location: { $exists: true, $ne: "" } }
+            ] 
+          } 
+        },
+        {
+          $lookup: {
+            from: "activities",
+            localField: "_id",
+            foreignField: "userId",
+            pipeline: [{ $match: { isValid: true } }],
+            as: "validActivities"
+          }
+        },
+        {
+          $project: {
+            province: { 
+              $ifNull: [
+                { $cond: [{ $eq: ["$city", ""] }, null, "$city"] }, 
+                "$location"
+              ] 
+            },
+            numActivities: { $size: "$validActivities" },
+            totalKm: { $sum: "$validActivities.distance" }
+          }
+        },
+        {
+          $group: {
+            _id: { $toUpper: { $trim: { input: "$province" } } },
+            members: { $sum: 1 },
+            activityCount: { $sum: "$numActivities" },
+            totalDistance: { $sum: "$totalKm" }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            province: "$_id",
+            members: 1,
+            activities: { $round: [{ $divide: ["$totalDistance", 1000] }, 1] },
+            rawActivityCount: "$activityCount"
+          }
+        }
+      ]);
+    } else {
+      // MODE 2: Group by Activity's recorded location (Default)
+      heatmapData = await Activity.aggregate([
+        { $match: { isValid: true, location: { $exists: true, $ne: "" } } },
+        {
+          $group: {
+            _id: { $toUpper: { $trim: { input: "$location" } } },
+            members: { $addToSet: "$userId" },
+            totalDistance: { $sum: "$distance" },
+            activityCount: { $sum: 1 }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            province: "$_id",
+            members: { $size: "$members" },
+            activities: { $round: [{ $divide: ["$totalDistance", 1000] }, 1] },
+            rawActivityCount: "$activityCount"
+          }
+        }
+      ]);
+    }
+
+    // 6. Post-processing for normalization and merging
+    const normalizedMap = heatmapData.reduce((acc, item) => {
+      const p = normalizeProvince(item.province);
       
-      return { ...item, province: p };
+      // Skip if normalization returned null (International or junk data)
+      if (!p) return acc;
+      
+      if (!acc[p]) {
+        acc[p] = { province: p, members: 0, activities: 0, rawActivityCount: 0 };
+      }
+      
+      acc[p].members += item.members;
+      acc[p].activities += item.activities;
+      acc[p].rawActivityCount += item.rawActivityCount;
+      
+      return acc;
+    }, {});
+
+    let cleanedData = Object.values(normalizedMap).map(item => ({
+      ...item,
+      activities: Math.round(item.activities * 10) / 10 // Re-round after sum
+    }));
+
+    // 7. Sort based on parameter (before object conversion)
+    if (sortBy === 'members') {
+      cleanedData.sort((a, b) => b.members - a.members || b.activities - a.activities);
+    } else {
+      cleanedData.sort((a, b) => b.activities - a.activities || b.members - a.members);
+    }
+
+    // 8. Transform to requested format: { members: { Province: Value }, activities: { Province: Value } }
+    const finalResult = {
+      members: {},
+      activities: {}
+    };
+
+    cleanedData.forEach(item => {
+      finalResult.members[item.province] = item.members;
+      finalResult.activities[item.province] = item.activities;
     });
 
-    res.json(cleanedData);
+    res.json(finalResult);
   } catch (error) {
     console.error("[Campaign Heatmap Error]:", error);
     res.status(500).json({ 

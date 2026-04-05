@@ -17,32 +17,35 @@ const UserSchema = new mongoose.Schema({
   },
   teamName: {
     type: String,
-    default: null, // by default user has no team
+    default: null,
+  },
+  generation: {
+    type: String, // e.g. "F7", "F8"
+  },
+  targetDistance: {
+    type: String, // e.g. "30km"
   },
   accessToken: {
     type: String,
-    required: false, // Optional for crawled users
+    required: false,
   },
   refreshToken: {
     type: String,
-    required: false, // Optional for crawled users
+    required: false,
   },
   tokenExpiresAt: {
-    type: Number, // UNIX timestamp from Strava
-    required: false, // Optional for crawled users
+    type: Number,
+    required: false,
   },
   isAuthorized: {
     type: Boolean,
-    default: false, // Default to false for crawled users
+    default: false,
   },
   location: {
     type: String, // from Strava
   },
   city: {
     type: String, // from Form (e.g. "Hồ Chí Minh")
-  },
-  group: {
-    type: String, // from Form (e.g. "11")
   },
   relationship: {
     type: String, // e.g. "Seeds", "Alumni"

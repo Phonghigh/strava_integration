@@ -1,0 +1,56 @@
+# .github/workflows/scheduled-sync.yml
+name: Scheduled Club Sync (Manual Script)
+
+on:
+  schedule:
+    # Runs every 60 minutes (actually hourly at minute 0)
+    - cron: '0 * * * *'
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Run Manual Club Sync
+    runs-on: ubuntu-latest
+    
+    # Optional: Prevent multiple syncs running at the same time
+    concurrency:
+      group: sync-job
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd server
+          npm install
+
+      - name: Run Club Sync Script
+        env:
+          # Database connection
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          
+          # Strava scraping credentials
+          STRAVA_CLUB_ID: ${{ secrets.STRAVA_CLUB_ID }}
+          STRAVA_REMEMBER_ID: ${{ secrets.STRAVA_REMEMBER_ID }}
+          STRAVA_REMEMBER_TOKEN: ${{ secrets.STRAVA_REMEMBER_TOKEN }}
+          STRAVA_SP_ID: ${{ secrets.STRAVA_SP_ID }}
+          
+          # Strava OAuth credentials (if needed for API fallback)
+          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+          
+          # App metadata
+          NODE_ENV: production
+        run: |
+          cd server
+          node manual-club-sync.js

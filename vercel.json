@@ -12,10 +12,4 @@
       "dest": "server/src/app.js"
     }
   ]
-  // "crons": [
-  //   {
-  //     "path": "/api/v1/cron/club-sync",
-  //     "schedule": "0 * * * *"
-  //   }
-  // ]
 }

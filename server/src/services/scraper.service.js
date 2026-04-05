@@ -37,19 +37,30 @@ const setStravaCookies = async (page) => {
  */
 export const scrapeClubMembers = async (clubId) => {
   const browser = await puppeteer.launch({ 
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+    headless: "new",
+    args: [
+      '--no-sandbox', 
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu'
+    ] 
   });
   
   try {
     const page = await browser.newPage();
     await setStravaCookies(page);
 
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     console.log(`[Scraper] Navigating to members page for club ${clubId}...`);
     await page.goto(`https://www.strava.com/clubs/${clubId}/members`, { 
       waitUntil: 'networkidle2',
       timeout: 60000 
     });
+
+    console.log(`[Scraper] Landed on: ${page.url()}`);
+    if (page.url().includes('/login')) {
+      throw new Error("AUTHENTICATION FAILED: Redirected to login page. Check your STRAVA_REMEMBER_ID and STRAVA_REMEMBER_TOKEN secrets.");
+    }
 
     let hasNextPage = true;
     let pageCount = 1;
@@ -178,11 +189,17 @@ export const scrapeClubActivities = async (clubId) => {
 
     while (!success && retries < maxRetries) {
       try {
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         console.log(`[Scraper] Accessing club recent activities (Attempt ${retries + 1}/${maxRetries})...`);
         await page.goto(clubUrl, { 
           waitUntil: 'networkidle2', 
           timeout: 90000 // 90 seconds
         });
+        
+        console.log(`[Scraper] Landed on: ${page.url()}`);
+        if (page.url().includes('/login')) {
+           throw new Error("AUTHENTICATION FAILED: Redirected to login page.");
+        }
         success = true;
       } catch (e) {
         retries++;

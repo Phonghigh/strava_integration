@@ -291,8 +291,7 @@ export const getAthleteDetail = async (req, res) => {
     const totalDistanceMeters = activities.reduce((sum, act) => sum + act.distance, 0);
     const totalDistanceKm = totalDistanceMeters / 1000;
 
-    // 4. Calculate Rank
-    // Find how many users have a greater total distance
+    // 4. Calculate Global Rank
     const betterAthletesResult = await Activity.aggregate([
       { $match: { isValid: true } },
       { $group: { _id: "$userId", totalDist: { $sum: "$distance" } } },

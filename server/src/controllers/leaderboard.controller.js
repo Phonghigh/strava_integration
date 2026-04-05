@@ -199,6 +199,11 @@ export const getTeamLeaderboard = async (req, res) => {
 
     // Execute Team Leaderboard aggregation
     const teamsData = await User.aggregate([
+      { 
+        $match: { 
+          teamName: { $ne: "No Team", $exists: true, $nin: ["", null] } 
+        } 
+      },
       {
         $lookup: {
           from: "activities",
@@ -235,6 +240,7 @@ export const getTeamLeaderboard = async (req, res) => {
 
     // Calculate total teams for metadata
     const totalTeamsResult = await User.aggregate([
+      { $match: { teamName: { $ne: "No Team", $exists: true, $nin: ["", null] } } },
       { $group: { _id: "$teamName" } },
       { $count: "total" }
     ]);

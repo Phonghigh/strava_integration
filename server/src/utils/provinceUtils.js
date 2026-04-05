@@ -9,10 +9,6 @@ export const normalizeProvince = (province) => {
   if (!province) return null;
   
   let p = province.trim().toUpperCase();
-  
-  // 0. Filter out International locations (Heatmap is for Vietnam only)
-  const internationalKeywords = ['USA', 'UNITED STATES', 'SINGAPORE', 'FRANCE', 'LILLE', 'JAPAN', 'KOREA', 'CHINA', 'UK', 'GERMANY'];
-  if (internationalKeywords.some(key => p.includes(key))) return null;
 
   // 1. Remove country suffixes
   p = p.replace(/,?\s*(VIETNAM|VIỆT NAM|VN)$/i, '');

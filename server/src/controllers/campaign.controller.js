@@ -234,18 +234,8 @@ export const getCampaignHeatmap = async (req, res) => {
       cleanedData.sort((a, b) => b.activities - a.activities || b.members - a.members);
     }
 
-    // 8. Transform to requested format: { members: { Province: Value }, activities: { Province: Value } }
-    const finalResult = {
-      members: {},
-      activities: {}
-    };
-
-    cleanedData.forEach(item => {
-      finalResult.members[item.province] = item.members;
-      finalResult.activities[item.province] = item.activities;
-    });
-
-    res.json(finalResult);
+    // 8. Return data as an array to match the HeatmapItem[] interface
+    res.json(cleanedData);
   } catch (error) {
     console.error("[Campaign Heatmap Error]:", error);
     res.status(500).json({ 

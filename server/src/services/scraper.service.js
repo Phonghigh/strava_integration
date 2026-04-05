@@ -147,14 +147,21 @@ export const scrapeClubMembers = async (clubId) => {
 export const scrapeClubActivities = async (clubId) => {
   const TARGET_DATE = new Date('2026-04-01T00:00:00Z');
   const browser = await puppeteer.launch({ 
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+    headless: "new",
+    args: [
+      '--no-sandbox', 
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu'
+    ] 
   });
   
   let activities = [];
   try {
     const page = await browser.newPage();
     await setStravaCookies(page);
+
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
     // Disable cache to ensure we catch the fresh initial packet
     await page.setCacheEnabled(false);

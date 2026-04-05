@@ -37,30 +37,20 @@ jobs:
           npm install
 
       - name: Create .env from Environment Secrets
-        # Map toàn bộ các biến lẻ bạn đã tạo vào file .env trong runner
-        env:
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
-          STRAVA_CLUB_ID: ${{ secrets.STRAVA_CLUB_ID }}
-          STRAVA_REMEMBER_ID: ${{ secrets.STRAVA_REMEMBER_ID }}
-          STRAVA_REMEMBER_TOKEN: ${{ secrets.STRAVA_REMEMBER_TOKEN }}
-          STRAVA_SP_ID: ${{ secrets.STRAVA_SP_ID }}
-          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
-          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
-          STRAVA_REDIRECT_URI: ${{ secrets.STRAVA_REDIRECT_URI }}
-          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        # Sử dụng 'EOF' có nháy đơn để ngăn shell giải mã các ký tự đặc biệt như $ trong Token
         run: |
-          touch server/.env
-          echo "MONGODB_URI=$MONGODB_URI" >> server/.env
-          echo "STRAVA_CLUB_ID=$STRAVA_CLUB_ID" >> server/.env
-          echo "STRAVA_REMEMBER_ID=$STRAVA_REMEMBER_ID" >> server/.env
-          echo "STRAVA_REMEMBER_TOKEN=$STRAVA_REMEMBER_TOKEN" >> server/.env
-          echo "STRAVA_SP_ID=$STRAVA_SP_ID" >> server/.env
-          echo "STRAVA_CLIENT_ID=$STRAVA_CLIENT_ID" >> server/.env
-          echo "STRAVA_CLIENT_SECRET=$STRAVA_CLIENT_SECRET" >> server/.env
-          echo "STRAVA_REDIRECT_URI=$STRAVA_REDIRECT_URI" >> server/.env
-          echo "FRONTEND_URL=$FRONTEND_URL" >> server/.env
-          echo "JWT_SECRET=$JWT_SECRET" >> server/.env
+          cat <<'EOF' > server/.env
+          MONGODB_URI=${{ secrets.MONGODB_URI }}
+          STRAVA_CLUB_ID=${{ secrets.STRAVA_CLUB_ID }}
+          STRAVA_REMEMBER_ID=${{ secrets.STRAVA_REMEMBER_ID }}
+          STRAVA_REMEMBER_TOKEN=${{ secrets.STRAVA_REMEMBER_TOKEN }}
+          STRAVA_SP_ID=${{ secrets.STRAVA_SP_ID }}
+          STRAVA_CLIENT_ID=${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET=${{ secrets.STRAVA_CLIENT_SECRET }}
+          STRAVA_REDIRECT_URI=${{ secrets.STRAVA_REDIRECT_URI }}
+          FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          EOF
 
       - name: Run Club Sync Script
         run: |

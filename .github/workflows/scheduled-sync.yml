@@ -3,9 +3,9 @@ name: Scheduled Club Sync (Manual Script)
 
 on:
   schedule:
-    # Runs every 60 minutes (actually hourly at minute 0)
+    # Chạy mỗi 60 phút
     - cron: '0 * * * *'
-  # Allows you to run this workflow manually from the Actions tab
+  # Cho phép chạy tay từ tab Actions
   workflow_dispatch:
 
 jobs:
@@ -13,7 +13,9 @@ jobs:
     name: Run Manual Club Sync
     runs-on: ubuntu-latest
     
-    # Optional: Prevent multiple syncs running at the same time
+    # Kết nối với Environment để đọc được các Environment Secrets
+    environment: Production – strava-integration-api
+    
     concurrency:
       group: sync-job
       cancel-in-progress: true
@@ -34,23 +36,33 @@ jobs:
           cd server
           npm install
 
-      - name: Run Club Sync Script
+      - name: Create .env from Environment Secrets
+        # Map toàn bộ các biến lẻ bạn đã tạo vào file .env trong runner
         env:
-          # Database connection
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
-          
-          # Strava scraping credentials
           STRAVA_CLUB_ID: ${{ secrets.STRAVA_CLUB_ID }}
           STRAVA_REMEMBER_ID: ${{ secrets.STRAVA_REMEMBER_ID }}
           STRAVA_REMEMBER_TOKEN: ${{ secrets.STRAVA_REMEMBER_TOKEN }}
           STRAVA_SP_ID: ${{ secrets.STRAVA_SP_ID }}
-          
-          # Strava OAuth credentials (if needed for API fallback)
           STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
           STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
-          
-          # App metadata
-          NODE_ENV: production
+          STRAVA_REDIRECT_URI: ${{ secrets.STRAVA_REDIRECT_URI }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          touch server/.env
+          echo "MONGODB_URI=$MONGODB_URI" >> server/.env
+          echo "STRAVA_CLUB_ID=$STRAVA_CLUB_ID" >> server/.env
+          echo "STRAVA_REMEMBER_ID=$STRAVA_REMEMBER_ID" >> server/.env
+          echo "STRAVA_REMEMBER_TOKEN=$STRAVA_REMEMBER_TOKEN" >> server/.env
+          echo "STRAVA_SP_ID=$STRAVA_SP_ID" >> server/.env
+          echo "STRAVA_CLIENT_ID=$STRAVA_CLIENT_ID" >> server/.env
+          echo "STRAVA_CLIENT_SECRET=$STRAVA_CLIENT_SECRET" >> server/.env
+          echo "STRAVA_REDIRECT_URI=$STRAVA_REDIRECT_URI" >> server/.env
+          echo "FRONTEND_URL=$FRONTEND_URL" >> server/.env
+          echo "JWT_SECRET=$JWT_SECRET" >> server/.env
+
+      - name: Run Club Sync Script
         run: |
           cd server
           node manual-club-sync.js

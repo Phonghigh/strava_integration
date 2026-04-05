@@ -85,7 +85,7 @@ export const getIndividualsLeaderboard = async (req, res) => {
                   $filter: {
                     input: "$validActivities",
                     as: "act",
-                    cond: { $gte: ["$$act.startDate", new Date(Date.now() - 24 * 60 * 60 * 1000)] }
+                    cond: { $gte: ["$$act.startDate", last24hTime] }
                   }
                 },
                 as: "recent",
@@ -291,9 +291,21 @@ export const getAthleteDetail = async (req, res) => {
     const totalDistanceMeters = activities.reduce((sum, act) => sum + act.distance, 0);
     const totalDistanceKm = totalDistanceMeters / 1000;
 
+    // 4. Calculate Rank
+    // Find how many users have a greater total distance
+    const betterAthletesResult = await Activity.aggregate([
+      { $match: { isValid: true } },
+      { $group: { _id: "$userId", totalDist: { $sum: "$distance" } } },
+      { $match: { totalDist: { $gt: totalDistanceMeters } } },
+      { $count: "count" }
+    ]);
+
+    const rank = (betterAthletesResult[0]?.count || 0) + 1;
+
     res.json({
       athlete: user,
       stats: {
+        rank,
         activityCount: activities.length,
         totalDistanceKm: parseFloat(totalDistanceKm.toFixed(2)),
         totalDistanceMeters

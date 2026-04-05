@@ -11,11 +11,11 @@
       "src": "/(.*)",
       "dest": "server/src/app.js"
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/v1/cron/club-sync",
-      "schedule": "0 * * * *"
-    }
   ]
+  // "crons": [
+  //   {
+  //     "path": "/api/v1/cron/club-sync",
+  //     "schedule": "0 * * * *"
+  //   }
+  // ]
 }

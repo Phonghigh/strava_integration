@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node --max-old-space-size=4096 src/app.js",
     "dev": "node --max-old-space-size=4096 --watch src/app.js",
-    "sync-now": "node manual-sync.js"
+    "sync-now": "node --max-old-space-size=4096 manual-sync.js",
+    "sync-club": "node --max-old-space-size=4096 manual-club-sync.js"
   },
   "engines": {
     "node": ">=18.0.0"

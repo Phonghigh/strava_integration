@@ -144,19 +144,28 @@ export const scrapeClubMembers = async (clubId) => {
 /**
  * Intercepts and fetches club activities via the internal API.
  */
-export const scrapeClubActivities = async (clubId) => {
+export const scrapeClubActivities = async (clubId, fullSync = false) => {
   const TARGET_DATE = new Date('2026-04-01T00:00:00Z');
+  
+  // Optimization: Load existing activity IDs to stop scrolling once we catch up
+  console.log(`[Scraper] Loading existing activity IDs from DB...`);
+  const existingIds = new Set((await Activity.find({}).select('stravaId').lean()).map(a => a.stravaId));
+  console.log(`[Scraper] Loaded ${existingIds.size} existing activities for smart catch-up.`);
+
   const browser = await puppeteer.launch({ 
     headless: "new",
     args: [
       '--no-sandbox', 
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-gpu'
+      '--disable-gpu',
+      '--disable-extensions'
     ] 
   });
   
   let activities = [];
+  let stopEarly = false;
+
   try {
     const page = await browser.newPage();
     await setStravaCookies(page);
@@ -168,22 +177,25 @@ export const scrapeClubActivities = async (clubId) => {
 
     page.on('response', async (response) => {
       const url = response.url();
-      // Broad match for any club feed packet
       if (url.includes('/feed') && (url.includes('feed_type=club') || url.includes('club_id'))) {
         try {
           if (response.status() === 200) {
-            console.log(`[Network] Captured Packet: ${url}`);
             const data = await response.json();
             if (data && data.entries) {
-              console.log(`[Network] Added ${data.entries.length} entries. Total now: ${activities.length + data.entries.length}`);
-              activities.push(...data.entries);
+              const entries = data.entries.filter(e => e.activity);
+              const newActivities = entries.filter(e => !existingIds.has(e.activity.id.toString()));
+              
+              console.log(`[Network] Captured ${entries.length} items. (${newActivities.length} NEW). Total unique: ${activities.length + entries.length}`);
+              activities.push(...entries);
+
+              // If a full page is already in the DB, we likely caught up (unless fullSync is enabled)
+              if (!fullSync && entries.length > 5 && newActivities.length === 0) {
+                  console.log(`[Network] Detected 100% data overlap with DB. Triggering catch-up break.`);
+                  stopEarly = true;
+              }
             }
-          } else if (response.status() !== 204 && response.status() !== 304) {
-             console.log(`[Network] Info: Observed packet ${url.split('/').pop()} with status ${response.status()}`);
           }
-        } catch (e) {
-          // Ignore parsing errors
-        }
+        } catch (e) {}
       }
     });
     // Optimize viewport for lazy loading
@@ -253,7 +265,7 @@ export const scrapeClubActivities = async (clubId) => {
     // Safety check for session
     const checkedInSession = new Set();
 
-    while (!reachedTargetDate && scrollCount < 150) {
+    while (!reachedTargetDate && !stopEarly && scrollCount < 150) {
         console.log(`[Scraper] Precise scrolling (Step ${scrollCount + 1}). Captured: ${activities.length}`);
         
         await page.evaluate(() => window.scrollBy(0, 1500));
@@ -261,6 +273,37 @@ export const scrapeClubActivities = async (clubId) => {
         await page.evaluate(() => window.scrollBy(0, -500));
         await new Promise(r => setTimeout(r, 400));
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+        if (stagnantCount > 0 && stagnantCount % 2 === 0) {
+            // Attempt to find and click "Show more" or similar button if infinite scroll is stuck
+            const diagnostic = await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button, a'));
+                const moreBtn = buttons.find(b => b.innerText.toLowerCase().includes('show more') || b.innerText.toLowerCase().includes('view more'));
+                if (moreBtn) {
+                    moreBtn.click();
+                    return { clicked: true, text: moreBtn.innerText };
+                }
+                // Check for "end of feed" messages
+                const bodyText = document.body.innerText.toLowerCase();
+                if (bodyText.includes("no more recent activity") || bodyText.includes("reached the end")) {
+                    return { clicked: false, endReached: true };
+                }
+                
+                // Try and simulate a click on the last activity entry to fire lazy load
+                const lastEntry = document.querySelector('div.feed-entry:last-child');
+                if (lastEntry) {
+                   lastEntry.scrollIntoView();
+                   return { clicked: false, scrolledEntry: true };
+                }
+                return { clicked: false };
+            });
+            
+            if (diagnostic.clicked) console.log(`[Scraper] Diagnostic: Found and clicked "${diagnostic.text}"`);
+            if (diagnostic.endReached) {
+                console.log(`[Scraper] Diagnostic: 'End of feed' message detected on page. Stopping.`);
+                break;
+            }
+        }
 
         if (stagnantCount > 0 && stagnantCount % 5 === 0) {
             console.log(`[Scraper] Stagnant steps: ${stagnantCount}. Refreshing position...`);
@@ -272,9 +315,14 @@ export const scrapeClubActivities = async (clubId) => {
         await new Promise(r => setTimeout(r, 5000));
         
         const newHeight = await page.evaluate('document.body.scrollHeight');
+        const capturedCount = activities.length;
+        
         if (newHeight <= lastHeight + 10) {
             stagnantCount++;
-            if (stagnantCount > 50) break;
+            if (stagnantCount > 10) {
+                console.log(`[Scraper] Breaking after ${stagnantCount} stagnant height steps.`);
+                break;
+            }
         } else {
             stagnantCount = 0;
             lastHeight = newHeight;
@@ -286,8 +334,11 @@ export const scrapeClubActivities = async (clubId) => {
             const lastActivityEntry = [...activities].reverse().find(entry => entry.activity);
             if (lastActivityEntry?.activity?.startDate) {
                 const lastDate = new Date(lastActivityEntry.activity.startDate);
+                if (scrollCount % 5 === 0) {
+                    console.log(`[Scraper] Current feed date: ${lastDate.toISOString()}`);
+                }
                 if (lastDate < TARGET_DATE) {
-                    console.log(`[Scraper] Reached ${lastDate.toISOString()}. Stopping.`);
+                    console.log(`[Scraper] Reached TARGET_DATE (${TARGET_DATE.toISOString()}). Current: ${lastDate.toISOString()}. Stopping.`);
                     reachedTargetDate = true;
                 }
             }

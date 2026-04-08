@@ -44,3 +44,36 @@ export const requireAuth = async (req, res, next) => {
     return res.status(401).json({ error: "Unauthorized / Invalid Token" });
   }
 };
+
+/**
+ * Populates req.user if a valid token is present, but doesn't block if missing or invalid.
+ */
+export const optionalAuth = async (req, res, next) => {
+  try {
+    let token;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.split(" ")[1];
+    } else if (req.body && req.body.token) {
+      token = req.body.token;
+    }
+
+    if (!token) return next();
+
+    const secret = process.env.JWT_SECRET || "vietseeds_secret_placeholder";
+    
+    // System token bypass
+    if (token === secret) return next();
+
+    const decoded = jwt.verify(token, secret);
+    const user = await User.findById(decoded.id);
+    if (user) {
+      req.user = user;
+    }
+    next();
+  } catch (error) {
+    // Silently fail for optional auth
+    next();
+  }
+};
+

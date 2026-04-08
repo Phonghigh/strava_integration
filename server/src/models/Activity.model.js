@@ -38,8 +38,23 @@ const ActivitySchema = new mongoose.Schema({
   },
   startDate: {
     type: Date,
-  }
+  },
+  polyline: {
+    type: String, // Encoded map data
+  },
+  isDetailScraped: {
+    type: Boolean,
+    default: false,
+  },
+  summaryLaps: [{
+    id: Number,
+    distance: Number,
+    movingTime: Number,
+    averageSpeed: Number,
+    split: Number
+  }]
 }, { timestamps: true });
+
 
 // Add an index to efficiently sort activities by date and filter by type if needed
 ActivitySchema.index({ startDate: -1 });

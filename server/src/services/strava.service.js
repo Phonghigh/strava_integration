@@ -76,3 +76,38 @@ export const getAthleteForUser = async (user) => {
 
   return res.data;
 };
+
+export const getDetailedActivity = async (user, stravaId) => {
+  const access_token = await refreshTokenIfNeeded(user);
+
+  const res = await axios.get(`${STRAVA_API}/activities/${stravaId}`, {
+    headers: { Authorization: `Bearer ${access_token}` },
+  });
+
+  return res.data;
+};
+
+export const getActivityStreams = async (user, stravaId) => {
+  const access_token = await refreshTokenIfNeeded(user);
+
+  const res = await axios.get(`${STRAVA_API}/activities/${stravaId}/streams`, {
+    headers: { Authorization: `Bearer ${access_token}` },
+    params: {
+      keys: "time,distance,latlng,altitude,velocity_smooth,heartrate,cadence,watts,temp,moving,grade_smooth",
+      key_by_type: true
+    },
+  });
+
+  return res.data;
+};
+
+export const getActivityLaps = async (user, stravaId) => {
+  const access_token = await refreshTokenIfNeeded(user);
+
+  const res = await axios.get(`${STRAVA_API}/activities/${stravaId}/laps`, {
+    headers: { Authorization: `Bearer ${access_token}` },
+  });
+
+  return res.data;
+};
+

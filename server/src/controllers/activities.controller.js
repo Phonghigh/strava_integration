@@ -1,6 +1,10 @@
 // src/controllers/activities.controller.js
 import { Activity } from "../models/Activity.model.js";
+import { User } from "../models/User.model.js";
 import { syncAllUsersActivities } from "../services/sync.service.js";
+import * as stravaService from "../services/strava.service.js";
+import mongoose from "mongoose";
+
 
 /**
  * GET /api/v1/activities/me
@@ -125,3 +129,122 @@ export const getRecentActivities = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch recent activities" });
   }
 };
+
+/**
+ * GET /api/v1/activities/:id
+ */
+export const getActivityDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Find Activity in DB
+    let query = { stravaId: id };
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      query = { $or: [{ _id: id }, { stravaId: id }] };
+    }
+    
+    const activityRecord = await Activity.findOne(query);
+    const stravaId = activityRecord?.stravaId || id;
+
+    // 1.5 Quick Return if already scraped and in DB
+    if (activityRecord?.polyline) {
+      return res.json({
+        activity: {
+          id: activityRecord.stravaId,
+          name: activityRecord.name,
+          distance: activityRecord.distance,
+          movingTime: activityRecord.movingTime,
+          type: activityRecord.type,
+          startDate: activityRecord.startDate,
+          map: {
+            polyline: activityRecord.polyline
+          }
+        },
+        streams: {
+          time: [],
+          distance: [],
+          latlng: [],
+          altitude: [],
+          velocity_smooth: [],
+          heartrate: []
+        },
+        laps: activityRecord.summaryLaps || []
+      });
+    }
+
+    // 2. Select User for Strava Token
+
+    let tokenUser = null;
+
+    // Option A: Use activity owner if authorized
+    if (activityRecord?.userId) {
+      const owner = await User.findById(activityRecord.userId);
+      if (owner?.isAuthorized) {
+        tokenUser = owner;
+      }
+    }
+
+    // Option B: Fallback to the requester (You) if logged in and authorized
+    if (!tokenUser && req.user?.isAuthorized) {
+      tokenUser = req.user;
+    }
+
+    if (!tokenUser) {
+      return res.status(401).json({ 
+        error: "Authorization required. Please connect your Strava account to view detailed activities." 
+      });
+    }
+
+    // 3. Fetch all details from Strava in parallel
+    // Refresh token once first to avoid race conditions in parallel calls
+    await stravaService.refreshTokenIfNeeded(tokenUser);
+    
+    const [detailedActivity, streams, laps] = await Promise.all([
+      stravaService.getDetailedActivity(tokenUser, stravaId),
+      stravaService.getActivityStreams(tokenUser, stravaId),
+      stravaService.getActivityLaps(tokenUser, stravaId)
+    ]);
+
+
+
+    // 4. Format and Return
+    res.json({
+      activity: {
+        id: detailedActivity.id.toString(),
+        name: detailedActivity.name,
+        distance: detailedActivity.distance,
+        movingTime: detailedActivity.moving_time,
+        elapsedTime: detailedActivity.elapsed_time,
+        totalElevationGain: detailedActivity.total_elevation_gain,
+        type: detailedActivity.type,
+        startDate: detailedActivity.start_date,
+        map: {
+          polyline: detailedActivity.map?.polyline || ""
+        }
+      },
+      streams: {
+        time: streams.time?.data || [],
+        distance: streams.distance?.data || [],
+        latlng: streams.latlng?.data || [],
+        altitude: streams.altitude?.data || [],
+        velocity_smooth: streams.velocity_smooth?.data || [],
+        heartrate: streams.heartrate?.data || []
+      },
+      laps: laps.map((lap, idx) => ({
+        id: lap.id,
+        distance: lap.distance,
+        movingTime: lap.moving_time,
+        averageSpeed: lap.average_speed,
+        split: idx + 1
+      }))
+    });
+
+  } catch (error) {
+    if (error.response?.status === 404) {
+      return res.status(404).json({ error: "Activity not found on Strava" });
+    }
+    console.error("[Get Activity Detail Error]", error.message);
+    res.status(500).json({ error: "Failed to fetch activity details" });
+  }
+};
+

@@ -1,58 +1,58 @@
-# .github/workflows/scheduled-sync.yml
-name: Scheduled Club Sync (Manual Script)
+# # .github/workflows/scheduled-sync.yml
+# name: Scheduled Club Sync (Manual Script)
 
-on:
-  schedule:
-    # Chạy mỗi 60 phút
-    - cron: '0 * * * *'
-  # Cho phép chạy tay từ tab Actions
-  workflow_dispatch:
+# on:
+#   schedule:
+#     # Chạy mỗi 60 phút
+#     - cron: '0 * * * *'
+#   # Cho phép chạy tay từ tab Actions
+#   workflow_dispatch:
 
-jobs:
-  sync:
-    name: Run Manual Club Sync
-    runs-on: ubuntu-latest
+# jobs:
+#   sync:
+#     name: Run Manual Club Sync
+#     runs-on: ubuntu-latest
     
-    # Kết nối với Environment để đọc được các Environment Secrets
-    environment: Production – strava-integration-api
+#     # Kết nối với Environment để đọc được các Environment Secrets
+#     environment: Production – strava-integration-api
     
-    concurrency:
-      group: sync-job
-      cancel-in-progress: true
+#     concurrency:
+#       group: sync-job
+#       cancel-in-progress: true
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
+#     steps:
+#       - name: Checkout Repository
+#         uses: actions/checkout@v3
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: server/package-lock.json
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v3
+#         with:
+#           node-version: '18'
+#           cache: 'npm'
+#           cache-dependency-path: server/package-lock.json
 
-      - name: Install dependencies
-        run: |
-          cd server
-          npm install
+#       - name: Install dependencies
+#         run: |
+#           cd server
+#           npm install
 
-      - name: Create .env from Environment Secrets
-        # Sử dụng 'EOF' có nháy đơn để ngăn shell giải mã các ký tự đặc biệt như $ trong Token
-        run: |
-          cat <<'EOF' > server/.env
-          MONGODB_URI=${{ secrets.MONGODB_URI }}
-          STRAVA_CLUB_ID=${{ secrets.STRAVA_CLUB_ID }}
-          STRAVA_REMEMBER_ID=${{ secrets.STRAVA_REMEMBER_ID }}
-          STRAVA_REMEMBER_TOKEN=${{ secrets.STRAVA_REMEMBER_TOKEN }}
-          STRAVA_SP_ID=${{ secrets.STRAVA_SP_ID }}
-          STRAVA_CLIENT_ID=${{ secrets.STRAVA_CLIENT_ID }}
-          STRAVA_CLIENT_SECRET=${{ secrets.STRAVA_CLIENT_SECRET }}
-          STRAVA_REDIRECT_URI=${{ secrets.STRAVA_REDIRECT_URI }}
-          FRONTEND_URL=${{ secrets.FRONTEND_URL }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          EOF
+#       - name: Create .env from Environment Secrets
+#         # Sử dụng 'EOF' có nháy đơn để ngăn shell giải mã các ký tự đặc biệt như $ trong Token
+#         run: |
+#           cat <<'EOF' > server/.env
+#           MONGODB_URI=${{ secrets.MONGODB_URI }}
+#           STRAVA_CLUB_ID=${{ secrets.STRAVA_CLUB_ID }}
+#           STRAVA_REMEMBER_ID=${{ secrets.STRAVA_REMEMBER_ID }}
+#           STRAVA_REMEMBER_TOKEN=${{ secrets.STRAVA_REMEMBER_TOKEN }}
+#           STRAVA_SP_ID=${{ secrets.STRAVA_SP_ID }}
+#           STRAVA_CLIENT_ID=${{ secrets.STRAVA_CLIENT_ID }}
+#           STRAVA_CLIENT_SECRET=${{ secrets.STRAVA_CLIENT_SECRET }}
+#           STRAVA_REDIRECT_URI=${{ secrets.STRAVA_REDIRECT_URI }}
+#           FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+#           JWT_SECRET=${{ secrets.JWT_SECRET }}
+#           EOF
 
-      - name: Run Club Sync Script
-        run: |
-          cd server
-          node manual-club-sync.js
+#       - name: Run Club Sync Script
+#         run: |
+#           cd server
+#           node manual-club-sync.js

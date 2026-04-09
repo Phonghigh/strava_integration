@@ -64,7 +64,8 @@ const runLocalDetailScraper = async (limit = 100) => {
         $or: [
             { isDetailScraped: { $ne: true } }, 
             { polyline: { $exists: false } },
-            { polyline: null }
+            { polyline: null },
+            { streams: { $exists: false } } // Enforce update if streams missing
         ],
         type: 'Run'
     };
@@ -92,19 +93,45 @@ const runLocalDetailScraper = async (limit = 100) => {
         const activity = activitiesToScrape[i];
         console.log(`\n[${i + 1}/${activitiesToScrape.length}] Scrapping: ${activity.name} (ID: ${activity.stravaId})...`);
 
+        let capturedStreams = {};
         let capturedPolyline = null;
         let capturedLaps = [];
 
-        // Network Interception Handler
+        // Network Interception Handler for STREAMS
         const interceptResponse = async (response) => {
             try {
                 const url = response.url();
-                if (url.includes('/streams') && url.includes('latlng')) {
+                if (url.includes('/streams') && (url.includes('latlng') || url.includes('altitude'))) {
                     const data = await response.json();
-                    const points = data.latlng || (Array.isArray(data) && data.find(s => s.type === 'latlng')?.data);
-                    if (Array.isArray(points) && points.length > 0) {
-                        capturedPolyline = encodePolyline(points);
-                        console.log(`   📍 Network: Captured ${points.length} points.`);
+                    
+                    // If it's an object: { "latlng": [], "altitude": [], ... }
+                    if (!Array.isArray(data)) {
+                        if (data.latlng) capturedStreams.latlng = data.latlng;
+                        if (data.altitude) capturedStreams.altitude = data.altitude;
+                        if (data.time) capturedStreams.time = data.time;
+                        if (data.velocity_smooth) capturedStreams.velocitySmooth = data.velocity_smooth;
+                        if (data.heartrate) capturedStreams.heartrate = data.heartrate;
+                        if (data.cadence) capturedStreams.cadence = data.cadence;
+                        if (data.distance) capturedStreams.distance = data.distance;
+                        if (data.grade_smooth) capturedStreams.gradeSmooth = data.grade_smooth;
+                    } 
+                    // If it's an array of objects: [ { type: 'latlng', data: [] }, ... ]
+                    else {
+                        data.forEach(s => {
+                            if (s.type === 'latlng') capturedStreams.latlng = s.data;
+                            if (s.type === 'altitude') capturedStreams.altitude = s.data;
+                            if (s.type === 'time') capturedStreams.time = s.data;
+                            if (s.type === 'velocity_smooth') capturedStreams.velocitySmooth = s.data;
+                            if (s.type === 'heartrate') capturedStreams.heartrate = s.data;
+                            if (s.type === 'cadence') capturedStreams.cadence = s.data;
+                            if (s.type === 'distance') capturedStreams.distance = s.data;
+                            if (s.type === 'grade_smooth') capturedStreams.gradeSmooth = s.data;
+                        });
+                    }
+
+                    if (capturedStreams.latlng) {
+                        capturedPolyline = encodePolyline(capturedStreams.latlng);
+                        console.log(`   📍 Network: Captured latlng (${capturedStreams.latlng.length} pts) and other streams.`);
                     }
                 }
             } catch (e) {}
@@ -115,7 +142,7 @@ const runLocalDetailScraper = async (limit = 100) => {
         try {
             await page.goto(`https://www.strava.com/activities/${activity.stravaId}`, { 
                 waitUntil: 'networkidle2',
-                timeout: 30000 
+                timeout: 35000 
             });
 
             if (page.url().includes('/login')) {
@@ -124,8 +151,8 @@ const runLocalDetailScraper = async (limit = 100) => {
             }
 
             // Scroll to trigger data loading
-            await page.evaluate(() => window.scrollBy(0, 600));
-            await delay(4000);
+            await page.evaluate(() => window.scrollBy(0, 800));
+            await delay(5000);
 
             // Fallback for polyline if network capture missed it
             if (!capturedPolyline) {
@@ -140,67 +167,129 @@ const runLocalDetailScraper = async (limit = 100) => {
                 if (capturedPolyline) console.log('   📍 DOM: Found polyline string.');
             }
 
-            // Extract Laps/Splits
-            capturedLaps = await page.evaluate(() => {
-                const table = document.querySelector('.mile-splits table') || 
-                              document.querySelector('.splits-table') || 
-                              document.querySelector('#splits') || 
-                              document.querySelector('[data-testid="splits"]');
-                if (!table) return [];
-                
-                const rows = Array.from(table.querySelectorAll('tbody tr'));
-                return rows.map((row) => {
-                    const cols = row.querySelectorAll('td');
-                    if (cols.length < 2) return null;
-                    const splitIdx = parseInt(cols[0].innerText.trim());
-                    const paceText = cols[1].innerText.trim().split(' ')[0];
-                    const paceParts = paceText.split(':').map(Number);
-                    let sec = 0;
-                    if (paceParts.length === 2) sec = paceParts[0] * 60 + paceParts[1];
-                    else if (paceParts.length === 3) sec = paceParts[0] * 3600 + paceParts[1] * 60 + paceParts[2];
+            // Scrape Summary Stats and Metadata
+            const extraData = await page.evaluate(() => {
+                const results = {
+                    totalElevationGain: 0,
+                    calories: 0,
+                    elapsedTime: 0,
+                    deviceName: '',
+                    description: '',
+                    athleteAvatar: ''
+                };
 
-                    return {
-                        split: splitIdx,
-                        distance: 1000,
-                        movingTime: sec,
-                        averageSpeed: sec > 0 ? (1000 / sec) : 0
-                    };
-                }).filter(l => l !== null && !isNaN(l.split));
+                // Labels to search for in inline-stats or similar
+                const statsSelectors = ['.inline-stats li', '.secondary-stats li', 'table.stats-table td'];
+                const allStats = [];
+                statsSelectors.forEach(sel => {
+                  document.querySelectorAll(sel).forEach(el => allStats.push(el.innerText));
+                });
+
+                allStats.forEach(text => {
+                    if (text.includes('Elevation')) {
+                        const m = text.match(/([\d,.]+)/);
+                        if (m) results.totalElevationGain = parseFloat(m[0].replace(',', ''));
+                    }
+                    if (text.includes('Calories')) {
+                        const m = text.match(/([\d,.]+)/);
+                        if (m) results.calories = parseFloat(m[0].replace(',', ''));
+                    }
+                    if (text.includes('Elapsed Time')) {
+                        const timeStr = text.split('\n')[0].trim();
+                        const parts = timeStr.split(':').map(Number);
+                        if (parts.length === 2) results.elapsedTime = parts[0] * 60 + parts[1];
+                        else if (parts.length === 3) results.elapsedTime = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                    }
+                });
+
+                // Device name
+                const deviceEl = document.querySelector('.device-name') || document.querySelector('[data-testid="device-name"]');
+                if (deviceEl) results.deviceName = deviceEl.innerText.trim();
+
+                // Description
+                const descEl = document.querySelector('.activity-description') || document.querySelector('.description-text');
+                if (descEl) results.description = descEl.innerText.trim();
+
+                // Athlete Avatar
+                const avatarImg = document.querySelector('.current-athlete img.avatar') || document.querySelector('a.athlete-name + img') || document.querySelector('img[alt$="avatar"]');
+                if (avatarImg) results.athleteAvatar = avatarImg.src;
+
+                // Also try to find laps in the table
+                const table = document.querySelector('.mile-splits table') || document.querySelector('.splits-table');
+                let laps = [];
+                if (table) {
+                    const rows = Array.from(table.querySelectorAll('tbody tr'));
+                    laps = rows.map((row) => {
+                        const cols = row.querySelectorAll('td');
+                        if (cols.length < 2) return null;
+                        const splitIdx = parseInt(cols[0].innerText.trim());
+                        const paceText = cols[1].innerText.trim().split(' ')[0];
+                        const paceParts = paceText.split(':').map(Number);
+                        let sec = 0;
+                        if (paceParts.length === 2) sec = paceParts[0] * 60 + paceParts[1];
+                        else if (paceParts.length === 3) sec = paceParts[0] * 3600 + paceParts[1] * 60 + paceParts[2];
+                        
+                        let elev = 0;
+                        if (cols[2]) {
+                            const m = cols[2].innerText.match(/(-?[\d,.]+)/);
+                            if (m) elev = parseFloat(m[0]);
+                        }
+
+                        return {
+                            split: splitIdx,
+                            distance: 1000,
+                            movingTime: sec,
+                            averageSpeed: sec > 0 ? (1000 / sec) : 0,
+                            totalElevationGain: elev
+                        };
+                    }).filter(l => l !== null && !isNaN(l.split));
+                }
+                results.laps = laps;
+                return results;
             });
 
             // Update Database
-            if (capturedPolyline) {
+            if (capturedPolyline || capturedStreams.latlng) {
                 await Activity.updateOne(
                     { _id: activity._id },
                     { 
                         $set: { 
                             polyline: capturedPolyline, 
-                            summaryLaps: capturedLaps, 
+                            summaryLaps: extraData.laps, 
+                            streams: capturedStreams,
+                            totalElevationGain: extraData.totalElevationGain || activity.totalElevationGain,
+                            calories: extraData.calories,
+                            elapsedTime: extraData.elapsedTime,
+                            deviceName: extraData.deviceName,
+                            description: extraData.description,
+                            athleteAvatar: extraData.athleteAvatar,
                             isDetailScraped: true 
                         } 
                     }
                 );
-                console.log(`   ✅ Success! Laps: ${capturedLaps.length}.`);
+                console.log(`   ✅ Success! Streams: ${Object.keys(capturedStreams).join(', ')}. Laps: ${extraData.laps.length}.`);
             } else {
                 console.log(`   ⚠️ No map data found for ${activity.stravaId}.`);
             }
 
         } catch (err) {
-            console.error(`   💥 Error: ${err.message}`);
+            console.error(`   💥 Error on ${activity.stravaId}: ${err.message}`);
         } finally {
             page.off('response', interceptResponse);
         }
 
-        // Wait between requests to mimic human behavior
-        const waitTime = 6000 + Math.random() * 4000;
+        // Delay to avoid detection
+        const waitTime = 7000 + Math.random() * 5000;
         await delay(waitTime);
     }
 
     console.log('\n🏁 Scraper process complete.');
   } catch (err) {
-    console.error('💥 Fatal error:', err);
+    console.error('💥 Fatal error in scraper:', err);
   } finally {
-    if (browser) await browser.close();
+    if (browser) {
+        try { await browser.close(); } catch(e) {}
+    }
     process.exit(0);
   }
 };

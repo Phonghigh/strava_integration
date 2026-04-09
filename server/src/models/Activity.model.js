@@ -51,9 +51,31 @@ const ActivitySchema = new mongoose.Schema({
     distance: Number,
     movingTime: Number,
     averageSpeed: Number,
-    split: Number
-  }]
+    split: Number,
+    totalElevationGain: Number
+  }],
+  // Detailed time-series data
+  streams: {
+    time: [Number],
+    latlng: [[Number]],
+    altitude: [Number],
+    velocitySmooth: [Number],
+    heartrate: [Number],
+    cadence: [Number],
+    distance: [Number],
+    gradeSmooth: [Number]
+  },
+  // Expanded summary stats
+  totalElevationGain: Number,
+  elapsedTime: Number,
+  calories: Number,
+  averageSpeed: Number,
+  maxSpeed: Number,
+  deviceName: String,
+  description: String,
+  athleteAvatar: String,
 }, { timestamps: true });
+
 
 
 // Add an index to efficiently sort activities by date and filter by type if needed

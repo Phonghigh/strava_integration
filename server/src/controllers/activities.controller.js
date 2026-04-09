@@ -154,23 +154,32 @@ export const getActivityDetail = async (req, res) => {
           name: activityRecord.name,
           distance: activityRecord.distance,
           movingTime: activityRecord.movingTime,
+          elapsedTime: activityRecord.elapsedTime || activityRecord.movingTime,
+          totalElevationGain: activityRecord.totalElevationGain || 0,
+          calories: activityRecord.calories || 0,
           type: activityRecord.type,
           startDate: activityRecord.startDate,
+          deviceName: activityRecord.deviceName || "",
+          description: activityRecord.description || "",
+          athleteAvatar: activityRecord.athleteAvatar || "",
           map: {
             polyline: activityRecord.polyline
           }
         },
         streams: {
-          time: [],
-          distance: [],
-          latlng: [],
-          altitude: [],
-          velocity_smooth: [],
-          heartrate: []
+          time: activityRecord.streams?.time || [],
+          distance: activityRecord.streams?.distance || [],
+          latlng: activityRecord.streams?.latlng || [],
+          altitude: activityRecord.streams?.altitude || [],
+          velocity_smooth: activityRecord.streams?.velocitySmooth || [],
+          heartrate: activityRecord.streams?.heartrate || [],
+          cadence: activityRecord.streams?.cadence || [],
+          grade_smooth: activityRecord.streams?.gradeSmooth || [],
         },
         laps: activityRecord.summaryLaps || []
       });
     }
+
 
     // 2. Select User for Strava Token
 

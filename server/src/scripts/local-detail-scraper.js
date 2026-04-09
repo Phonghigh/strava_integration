@@ -53,9 +53,28 @@ function encodeValue(value) {
     return encoded;
 }
 
-const runLocalDetailScraper = async (limit = 100) => {
+const runLocalDetailScraper = async () => {
   const force = process.argv.includes('--force');
+  
+  // Parse limit from command line --limit=XXX
+  let limitValue = 100;
+  const limitArg = process.argv.find(arg => arg.startsWith('--limit='));
+  if (limitArg) {
+      const val = limitArg.split('=')[1];
+      limitValue = val === 'all' ? 999999 : parseInt(val);
+  } else if (process.argv.includes('--all')) {
+      limitValue = 999999;
+  }
+
   let browser;
+  let summary = {
+      total: 0,
+      success: 0,
+      failed: 0,
+      newlyScraped: 0,
+      forceUpdated: 0
+  };
+
   try {
     await connectDB();
     
@@ -65,19 +84,20 @@ const runLocalDetailScraper = async (limit = 100) => {
             { isDetailScraped: { $ne: true } }, 
             { polyline: { $exists: false } },
             { polyline: null },
-            { streams: { $exists: false } } // Enforce update if streams missing
+            { streams: { $exists: false } }
         ],
         type: 'Run'
     };
 
-    const activitiesToScrape = await Activity.find(query).sort({ startDate: -1 }).limit(limit);
+    const activitiesToScrape = await Activity.find(query).sort({ startDate: -1 }).limit(limitValue);
+    summary.total = activitiesToScrape.length;
 
     if (activitiesToScrape.length === 0) {
       console.log('✨ No activities found that need scraping.');
       process.exit(0);
     }
 
-    console.log(`🚀 Scraper started${force ? ' (FORCE MODE)' : ''}. Target: ${activitiesToScrape.length} activities.`);
+    console.log(`🚀 Scraper started. Mode: ${force ? 'FORCE' : 'INCREMENTAL'}. Target: ${activitiesToScrape.length} activities.`);
 
     browser = await puppeteer.launch({ 
       headless: "new",
@@ -91,20 +111,19 @@ const runLocalDetailScraper = async (limit = 100) => {
 
     for (let i = 0; i < activitiesToScrape.length; i++) {
         const activity = activitiesToScrape[i];
+        const wasScraped = activity.isDetailScraped;
+        
         console.log(`\n[${i + 1}/${activitiesToScrape.length}] Scrapping: ${activity.name} (ID: ${activity.stravaId})...`);
 
         let capturedStreams = {};
         let capturedPolyline = null;
         let capturedLaps = [];
 
-        // Network Interception Handler for STREAMS
         const interceptResponse = async (response) => {
             try {
                 const url = response.url();
                 if (url.includes('/streams') && (url.includes('latlng') || url.includes('altitude'))) {
                     const data = await response.json();
-                    
-                    // If it's an object: { "latlng": [], "altitude": [], ... }
                     if (!Array.isArray(data)) {
                         if (data.latlng) capturedStreams.latlng = data.latlng;
                         if (data.altitude) capturedStreams.altitude = data.altitude;
@@ -114,9 +133,7 @@ const runLocalDetailScraper = async (limit = 100) => {
                         if (data.cadence) capturedStreams.cadence = data.cadence;
                         if (data.distance) capturedStreams.distance = data.distance;
                         if (data.grade_smooth) capturedStreams.gradeSmooth = data.grade_smooth;
-                    } 
-                    // If it's an array of objects: [ { type: 'latlng', data: [] }, ... ]
-                    else {
+                    } else {
                         data.forEach(s => {
                             if (s.type === 'latlng') capturedStreams.latlng = s.data;
                             if (s.type === 'altitude') capturedStreams.altitude = s.data;
@@ -131,7 +148,6 @@ const runLocalDetailScraper = async (limit = 100) => {
 
                     if (capturedStreams.latlng) {
                         capturedPolyline = encodePolyline(capturedStreams.latlng);
-                        console.log(`   📍 Network: Captured latlng (${capturedStreams.latlng.length} pts) and other streams.`);
                     }
                 }
             } catch (e) {}
@@ -150,11 +166,9 @@ const runLocalDetailScraper = async (limit = 100) => {
                 break;
             }
 
-            // Scroll to trigger data loading
             await page.evaluate(() => window.scrollBy(0, 800));
             await delay(5000);
 
-            // Fallback for polyline if network capture missed it
             if (!capturedPolyline) {
                 capturedPolyline = await page.evaluate(() => {
                     const scripts = Array.from(document.querySelectorAll('script'));
@@ -164,36 +178,17 @@ const runLocalDetailScraper = async (limit = 100) => {
                     }
                     return null;
                 });
-                if (capturedPolyline) console.log('   📍 DOM: Found polyline string.');
             }
 
-            // Scrape Summary Stats and Metadata
             const extraData = await page.evaluate(() => {
-                const results = {
-                    totalElevationGain: 0,
-                    calories: 0,
-                    elapsedTime: 0,
-                    deviceName: '',
-                    description: '',
-                    athleteAvatar: ''
-                };
-
-                // Labels to search for in inline-stats or similar
+                const results = { totalElevationGain: 0, calories: 0, elapsedTime: 0, deviceName: '', description: '', athleteAvatar: '', laps: [] };
                 const statsSelectors = ['.inline-stats li', '.secondary-stats li', 'table.stats-table td'];
                 const allStats = [];
-                statsSelectors.forEach(sel => {
-                  document.querySelectorAll(sel).forEach(el => allStats.push(el.innerText));
-                });
+                statsSelectors.forEach(sel => document.querySelectorAll(sel).forEach(el => allStats.push(el.innerText)));
 
                 allStats.forEach(text => {
-                    if (text.includes('Elevation')) {
-                        const m = text.match(/([\d,.]+)/);
-                        if (m) results.totalElevationGain = parseFloat(m[0].replace(',', ''));
-                    }
-                    if (text.includes('Calories')) {
-                        const m = text.match(/([\d,.]+)/);
-                        if (m) results.calories = parseFloat(m[0].replace(',', ''));
-                    }
+                    if (text.includes('Elevation')) { const m = text.match(/([\d,.]+)/); if (m) results.totalElevationGain = parseFloat(m[0].replace(',', '')); }
+                    if (text.includes('Calories')) { const m = text.match(/([\d,.]+)/); if (m) results.calories = parseFloat(m[0].replace(',', '')); }
                     if (text.includes('Elapsed Time')) {
                         const timeStr = text.split('\n')[0].trim();
                         const parts = timeStr.split(':').map(Number);
@@ -202,94 +197,63 @@ const runLocalDetailScraper = async (limit = 100) => {
                     }
                 });
 
-                // Device name
                 const deviceEl = document.querySelector('.device-name') || document.querySelector('[data-testid="device-name"]');
                 if (deviceEl) results.deviceName = deviceEl.innerText.trim();
-
-                // Description
                 const descEl = document.querySelector('.activity-description') || document.querySelector('.description-text');
                 if (descEl) results.description = descEl.innerText.trim();
-
-                // Athlete Avatar
                 const avatarImg = document.querySelector('.current-athlete img.avatar') || document.querySelector('a.athlete-name + img') || document.querySelector('img[alt$="avatar"]');
                 if (avatarImg) results.athleteAvatar = avatarImg.src;
 
-                // Also try to find laps in the table
                 const table = document.querySelector('.mile-splits table') || document.querySelector('.splits-table');
-                let laps = [];
                 if (table) {
                     const rows = Array.from(table.querySelectorAll('tbody tr'));
-                    laps = rows.map((row) => {
+                    results.laps = rows.map((row) => {
                         const cols = row.querySelectorAll('td');
                         if (cols.length < 2) return null;
-                        const splitIdx = parseInt(cols[0].innerText.trim());
-                        const paceText = cols[1].innerText.trim().split(' ')[0];
-                        const paceParts = paceText.split(':').map(Number);
-                        let sec = 0;
-                        if (paceParts.length === 2) sec = paceParts[0] * 60 + paceParts[1];
-                        else if (paceParts.length === 3) sec = paceParts[0] * 3600 + paceParts[1] * 60 + paceParts[2];
-                        
-                        let elev = 0;
-                        if (cols[2]) {
-                            const m = cols[2].innerText.match(/(-?[\d,.]+)/);
-                            if (m) elev = parseFloat(m[0]);
-                        }
-
-                        return {
-                            split: splitIdx,
-                            distance: 1000,
-                            movingTime: sec,
-                            averageSpeed: sec > 0 ? (1000 / sec) : 0,
-                            totalElevationGain: elev
-                        };
+                        const paceParts = cols[1].innerText.trim().split(' ')[0].split(':').map(Number);
+                        let sec = paceParts.length === 2 ? paceParts[0] * 60 + paceParts[1] : (paceParts.length === 3 ? paceParts[0]*3600 + paceParts[1]*60 + paceParts[2] : 0);
+                        let elev = 0; if (cols[2]) { const m = cols[2].innerText.match(/(-?[\d,.]+)/); if (m) elev = parseFloat(m[0]); }
+                        return { split: parseInt(cols[0].innerText), distance: 1000, movingTime: sec, averageSpeed: sec > 0 ? (1000 / sec) : 0, totalElevationGain: elev };
                     }).filter(l => l !== null && !isNaN(l.split));
                 }
-                results.laps = laps;
                 return results;
             });
 
-            // Update Database
             if (capturedPolyline || capturedStreams.latlng) {
-                await Activity.updateOne(
-                    { _id: activity._id },
-                    { 
-                        $set: { 
-                            polyline: capturedPolyline, 
-                            summaryLaps: extraData.laps, 
-                            streams: capturedStreams,
-                            totalElevationGain: extraData.totalElevationGain || activity.totalElevationGain,
-                            calories: extraData.calories,
-                            elapsedTime: extraData.elapsedTime,
-                            deviceName: extraData.deviceName,
-                            description: extraData.description,
-                            athleteAvatar: extraData.athleteAvatar,
-                            isDetailScraped: true 
-                        } 
-                    }
-                );
-                console.log(`   ✅ Success! Streams: ${Object.keys(capturedStreams).join(', ')}. Laps: ${extraData.laps.length}.`);
+                await Activity.updateOne( { _id: activity._id }, { $set: { polyline: capturedPolyline, summaryLaps: extraData.laps, streams: capturedStreams, totalElevationGain: extraData.totalElevationGain || activity.totalElevationGain, calories: extraData.calories, elapsedTime: extraData.elapsedTime, deviceName: extraData.deviceName, description: extraData.description, athleteAvatar: extraData.athleteAvatar, isDetailScraped: true } } );
+                console.log(`   ✅ Success! Streams: ${Object.keys(capturedStreams).length}. Laps: ${extraData.laps.length}.`);
+                summary.success++;
+                if (wasScraped) summary.forceUpdated++; else summary.newlyScraped++;
             } else {
                 console.log(`   ⚠️ No map data found for ${activity.stravaId}.`);
+                summary.failed++;
             }
 
         } catch (err) {
             console.error(`   💥 Error on ${activity.stravaId}: ${err.message}`);
+            summary.failed++;
         } finally {
             page.off('response', interceptResponse);
         }
 
-        // Delay to avoid detection
-        const waitTime = 7000 + Math.random() * 5000;
+        const waitTime = 6000 + Math.random() * 4000;
         await delay(waitTime);
     }
 
-    console.log('\n🏁 Scraper process complete.');
+    console.log('\n' + '='.repeat(40));
+    console.log('🏁 SCRAPER REPORT');
+    console.log('='.repeat(40));
+    console.log(`Total Handled:    ${summary.total}`);
+    console.log(`Successfully:     ${summary.success}`);
+    console.log(`Failed:           ${summary.failed}`);
+    console.log(`  - Newly Scraped:  ${summary.newlyScraped}`);
+    console.log(`  - Force Updated:  ${summary.forceUpdated}`);
+    console.log('='.repeat(40));
+
   } catch (err) {
     console.error('💥 Fatal error in scraper:', err);
   } finally {
-    if (browser) {
-        try { await browser.close(); } catch(e) {}
-    }
+    if (browser) { try { await browser.close(); } catch(e) {} }
     process.exit(0);
   }
 };

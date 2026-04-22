@@ -133,3 +133,72 @@ export const normalizeProvince = (province) => {
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 };
+
+/**
+ * Maps a normalized province name to a region (bac, trung, nam).
+ */
+export const getRegionFromProvince = (province) => {
+  if (!province) return null;
+
+  const normalized = province.trim();
+
+  const bac = [
+    'Hà Nội', 'Hải Phòng', 'Quảng Ninh', 'Bắc Ninh', 'Bắc Giang', 'Bắc Kạn', 
+    'Cao Bằng', 'Hà Giang', 'Lào Cai', 'Yên Bái', 'Thái Nguyên', 'Lạng Sơn', 
+    'Tuyên Quang', 'Phú Thọ', 'Vĩnh Phúc', 'Thái Bình', 'Nam Định', 'Hà Nam', 
+    'Ninh Bình', 'Hưng Yên', 'Hòa Bình', 'Sơn La', 'Điện Biên', 'Lai Châu',
+    'Ha Noi', 'Hai Phong', 'Vinh Phuc', 'Bac Ninh', 'Hung Yen', 'Hai Duong',
+    'Ha Nam', 'Nam Dinh', 'Thai Binh', 'Ninh Binh', 'Ha Giang', 'Cao Bang',
+    'Bac Kan', 'Tuyen Quang', 'Lao Cai', 'Yen Bai', 'Thai Nguyen', 'Lang Son',
+    'Quang Ninh', 'Bac Giang', 'Phu Tho', 'Hoa Binh', 'Son La', 'Dien Bien', 'Lai Chau'
+  ];
+
+  const trung = [
+    'Thanh Hóa', 'Nghệ An', 'Hà Tĩnh', 'Quảng Bình', 'Quảng Trị', 'Huế', 
+    'Đà Nẵng', 'Quảng Nam', 'Quảng Ngãi', 'Bình Định', 'Phú Yên', 'Khánh Hòa', 
+    'Ninh Thuận', 'Bình Thuận', 'Kon Tum', 'Gia Lai', 'Đắk Lắk', 'Đắk Nông', 'Lâm Đồng',
+    'Thanh Hoa', 'Nghe An', 'Ha Tinh', 'Quang Binh', 'Quang Tri', 'Thua Thien Hue',
+    'Da Nang', 'Quang Nam', 'Quang Ngai', 'Binh Dinh', 'Phu Yen', 'Khanh Hoa',
+    'Ninh Thuan', 'Binh Thuan', 'Kon Tum', 'Gia Lai', 'Dak Lak', 'Dak Nong', 'Lam Dong'
+  ];
+
+  const nam = [
+    'Hồ Chí Minh', 'Bình Dương', 'Bình Phước', 'Tây Ninh', 'Đồng Nai', 
+    'Bà Rịa - Vũng Tàu', 'Long An', 'Tiền Giang', 'Bến Tre', 'Trà Vinh', 
+    'Vĩnh Long', 'An Giang', 'Đồng Tháp', 'Kiên Giang', 'Cần Thơ', 'Hậu Giang', 
+    'Sóc Trăng', 'Bạc Liêu', 'Cà Mau',
+    'TP HCM', 'Ho Chi Minh', 'Binh Duong', 'Binh Phuoc', 'Tay Ninh', 'Dong Nai',
+    'Ba Ria Vung Tau', 'Long An', 'Tien Giang', 'Ben Tre', 'Tra Vinh', 'Vinh Long',
+    'An Giang', 'Dong Thap', 'Kien Giang', 'Can Tho', 'Hau Giang', 'Soc Trang',
+    'Bac Lieu', 'Ca Mau'
+  ];
+
+  if (bac.some(p => normalized.includes(p) || p.includes(normalized))) return 'bac';
+  if (trung.some(p => normalized.includes(p) || p.includes(normalized))) return 'trung';
+  if (nam.some(p => normalized.includes(p) || p.includes(normalized))) return 'nam';
+
+  return null;
+};
+
+/**
+ * Extracts region from team name format: "Nhóm XX [Location]"
+ */
+export const getRegionFromTeamName = (teamName) => {
+  if (!teamName) return null;
+  
+  const upper = teamName.toUpperCase();
+  
+  // Specific keywords in team names
+  const bacKeywords = ['HN', 'HÀ NỘI', 'HANOI', 'BẮC', 'THÁI NGUYÊN', 'HẢI PHÒNG'];
+  const trungKeywords = ['HUẾ', 'HUE', 'ĐÀ NẴNG', 'DANANG', 'QUẢNG NAM', 'TRUNG', 'QUẢNG TRỊ'];
+  const namKeywords = ['HCM', 'HỒ CHÍ MINH', 'SAIGON', 'NAM', 'CẦN THƠ', 'BÌNH DƯƠNG'];
+
+  if (bacKeywords.some(key => upper.includes(key))) return 'bac';
+  if (trungKeywords.some(key => upper.includes(key))) return 'trung';
+  if (namKeywords.some(key => upper.includes(key))) return 'nam';
+
+  // Fallback to general province mapping if team name contains a province name
+  return getRegionFromProvince(teamName);
+};
+
+

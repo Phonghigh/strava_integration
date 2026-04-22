@@ -24,6 +24,7 @@ export const exchangeTokenAndSaveUser = async (code) => {
       firstName: athlete.firstname,
       lastName: athlete.lastname,
       profile: athlete.profile,
+      gender: athlete.sex === 'M' ? 'male' : (athlete.sex === 'F' ? 'female' : null),
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
       tokenExpiresAt: data.expires_at,

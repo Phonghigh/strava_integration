@@ -54,6 +54,16 @@ const UserSchema = new mongoose.Schema({
     type: String,
     lowercase: true,
     trim: true,
+  },
+  gender: {
+    type: String,
+    enum: ['male', 'female', 'other', null],
+    default: null,
+  },
+  region: {
+    type: String,
+    enum: ['bac', 'trung', 'nam', null],
+    default: null,
   }
 }, { timestamps: true });
 

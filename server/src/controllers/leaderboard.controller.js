@@ -2,6 +2,7 @@ import { Activity } from "../models/Activity.model.js";
 import { User } from "../models/User.model.js";
 import mongoose from "mongoose";
 import { syncClubData } from "../services/sync.service.js";
+import { getRegionFromProvince } from "../utils/provinceUtils.js";
 
 /**
  * GET /api/v1/leaderboard/individuals
@@ -62,17 +63,23 @@ export const getIndividualsLeaderboard = async (req, res) => {
     const nowTime = new Date();
     const last24hTime = new Date(nowTime.getTime() - 24 * 60 * 60 * 1000);
 
-    // E. User Match Query (Search)
+    // E. User Match Query (Search, Gender, Region)
     let userMatch = {};
     if (search) {
       const searchRegex = new RegExp(search, "i");
-      userMatch = {
-        $or: [
-          { firstName: { $regex: searchRegex } },
-          { lastName: { $regex: searchRegex } },
-          { stravaId: search }
-        ]
-      };
+      userMatch.$or = [
+        { firstName: { $regex: searchRegex } },
+        { lastName: { $regex: searchRegex } },
+        { stravaId: search }
+      ];
+    }
+    
+    if (req.query.gender && req.query.gender !== "all") {
+      userMatch.gender = req.query.gender;
+    }
+    
+    if (req.query.region && req.query.region !== "all") {
+      userMatch.region = req.query.region;
     }
 
     // F. Apply Pagination (Starting from USER to include 0km people)
@@ -118,16 +125,14 @@ export const getIndividualsLeaderboard = async (req, res) => {
         $project: {
           _id: 0,
           userId: "$_id",
-          stravaId: 1,
-          name: { $concat: [{ $ifNull: ["$firstName", ""] }, " ", { $ifNull: ["$lastName", ""] }] },
+          name: { $trim: { input: { $concat: [{ $ifNull: ["$firstName", ""] }, " ", { $ifNull: ["$lastName", ""] }] } } },
           avatar: "$profile",
-          location: 1,
-          teamName: 1,
-          gender: 1,
-          distance: { $divide: ["$totalDistance", 1000] },
-          totalMovingTime: 1,
+          distance: { $round: [{ $divide: ["$totalDistance", 1000] }, 2] },
           activitiesCount: 1,
-          trend: { $divide: ["$distanceLast24h", 1000] }
+          // Optional but good for debugging/FE:
+          gender: 1,
+          region: 1,
+          teamName: 1
         }
       },
       { $sort: { distance: -1, name: 1 } },
@@ -207,7 +212,7 @@ export const getTeamLeaderboard = async (req, res) => {
       startDate = monthStart < challengeStart ? challengeStart : monthStart;
       endDate = new Date(today);
       endDate.setHours(23, 59, 59, 999);
-    } else if (timeframe === "all") {
+    } else if (timeframe === "all" || !timeframe) {
       startDate = new Date("2026-04-01T00:00:00Z");
       endDate = new Date("2026-04-30T23:59:59Z");
     }
@@ -217,13 +222,20 @@ export const getTeamLeaderboard = async (req, res) => {
       startDate: { $gte: startDate, $lte: endDate }
     };
 
+    // User match for region filtering
+    let teamUserMatch = {
+      teamName: { $ne: "No Team", $exists: true, $nin: ["", null] }
+    };
+    
+    if (req.query.region && req.query.region !== "all") {
+      teamUserMatch.region = req.query.region;
+    }
+
 
     // Execute Team Leaderboard aggregation
     const teamsData = await User.aggregate([
       { 
-        $match: { 
-          teamName: { $ne: "No Team", $exists: true, $nin: ["", null] } 
-        } 
+        $match: teamUserMatch 
       },
       {
         $lookup: {

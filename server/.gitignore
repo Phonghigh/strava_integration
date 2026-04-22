@@ -1,2 +1,8 @@
 .env
 node_modules/
+server/src/data/
+*.csv
+scratch/
+debug-*.png
+debug-*.html
+*.log

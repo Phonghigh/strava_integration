@@ -10,7 +10,7 @@ const checkTeamNames = async () => {
         await connectDB();
 
         // Regex for the new standard format: "Nhóm [Number] [HCM/HN/Huế]"
-        const standardFormat = /^Nhóm \d+ (HCM|HN|Huế)$/;
+        const standardFormat = /^Nhóm \d{2} (HCM|HN|Huế)$/;
 
         const users = await User.find({});
 

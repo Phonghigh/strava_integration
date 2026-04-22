@@ -20,7 +20,7 @@ export const getIndividualsLeaderboard = async (req, res) => {
     }
     
     const skip = (page - 1) * limit;
-    const { startDate: qStart, endDate: qEnd, timeframe } = req.query;
+    const { startDate: qStart, endDate: qEnd, timeframe, search } = req.query;
 
     let startDate = qStart ? new Date(qStart) : new Date("2026-04-01T00:00:00Z");
     let endDate = qEnd ? new Date(qEnd) : new Date("2026-04-30T23:59:59Z");
@@ -62,8 +62,27 @@ export const getIndividualsLeaderboard = async (req, res) => {
     const nowTime = new Date();
     const last24hTime = new Date(nowTime.getTime() - 24 * 60 * 60 * 1000);
 
+    // E. User Match Query (Search)
+    let userMatch = {};
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+      userMatch = {
+        $or: [
+          { firstName: { $regex: searchRegex } },
+          { lastName: { $regex: searchRegex } },
+          { stravaId: search }
+        ]
+      };
+    }
+
     // F. Apply Pagination (Starting from USER to include 0km people)
-    const leaderboard = await User.aggregate([
+    const pipeline = [];
+    
+    if (Object.keys(userMatch).length > 0) {
+      pipeline.push({ $match: userMatch });
+    }
+
+    pipeline.push(
       {
         $lookup: {
           from: "activities",
@@ -114,10 +133,12 @@ export const getIndividualsLeaderboard = async (req, res) => {
       { $sort: { distance: -1, name: 1 } },
       { $skip: skip },
       { $limit: limit }
-    ]);
+    );
+
+    const leaderboard = await User.aggregate(pipeline);
 
     // G. Total Count for pagination meta
-    const total = await User.countDocuments({});
+    const total = await User.countDocuments(userMatch);
 
     // H. Add ranks and format details
     const rankedLeaderboard = leaderboard.map((item, index) => {

@@ -76,7 +76,8 @@ const updateDatabase = async () => {
             // New Rule: "Nhóm + N + Rooftop" ONLY if both city (standard) and group exist
             let teamName = null;
             if (city && group) {
-                teamName = `Nhóm ${group} ${city}`;
+                const paddedGroup = group.toString().trim().padStart(2, '0');
+                teamName = `Nhóm ${paddedGroup} ${city}`;
             }
 
             const updateData = {
@@ -112,7 +113,7 @@ const updateDatabase = async () => {
         });
 
         let nameBasedUpdated = 0;
-        const nameRegex = /^- (\d+) - (.*)$/;
+        const nameRegex = /^[\s-]*(\d+)[\s-]*(.*)$/;
 
         for (const user of allNullUsers) {
             const { firstName, lastName } = user;
@@ -129,7 +130,8 @@ const updateDatabase = async () => {
                 else if (region.toLowerCase().includes('huế') || region.toLowerCase().includes('hue')) city = 'Huế';
 
                 if (city && group) {
-                    const newTeamName = `Nhóm ${group} ${city}`;
+                    const paddedGroup = group.toString().trim().padStart(2, '0');
+                    const newTeamName = `Nhóm ${paddedGroup} ${city}`;
                     await User.updateOne({ _id: user._id }, { $set: { teamName: newTeamName } });
                     nameBasedUpdated++;
                 } else {
@@ -144,9 +146,9 @@ const updateDatabase = async () => {
             }
         }
 
-        // Final cleanup: any teamName that doesn't follow the "Nhóm \d+ (HCM|HN|Huế)" format sets to null
+        // Final cleanup: any teamName that doesn't follow the "Nhóm \d{2} (HCM|HN|Huế)" format sets to null
         const finalCheck = await User.find({ teamName: { $ne: null } });
-        const standardFormat = /^Nhóm \d+ (HCM|HN|Huế)$/;
+        const standardFormat = /^Nhóm \d{2} (HCM|HN|Huế)$/;
         let finalCleaned = 0;
         for (const user of finalCheck) {
             if (!standardFormat.test(user.teamName)) {

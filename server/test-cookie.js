@@ -15,19 +15,19 @@ async function testCookies() {
   const cookies = [
     {
       name: 'strava_remember_id',
-      value: '160997016',
+      value: process.env.STRAVA_REMEMBER_ID,
       domain: 'www.strava.com',
       path: '/',
     },
     {
       name: 'strava_remember_token',
-      value: 'eyJzaWduaW5nX2tleSI6InYxIiwiZW5jcnlwdGlvbl9rZXkiOiJ2MSIsIml2IjoiQk1KVFQ2UFdWR1lrYUkyVzlQMEJYdz09XG4iLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJjb20uc3RyYXZhLmF0aGxldGVzIiwic3ViIjoxNjA5OTcwMTYsImlhdCI6MTc3NTEzMzg0NywiZXhwIjoxNzc3NzI1ODQ3LCJlbWFpbCI6IjVGZHErWm9WaGU4K1ZLZnZEazI0cW04L0JEU3hMK3hLMGZIN3dqeHVLTzgyMzJRNkhZK0QzMVV4NTJUb1xudGJISVxuIn0.GGRLC12fJwBSyOLGIgXUMXHWnqeHhHExVGBS26x-f3g',
+      value: process.env.STRAVA_REMEMBER_TOKEN,
       domain: 'www.strava.com',
       path: '/',
     },
     {
       name: 'sp',
-      value: '4a9bc5c8-6354-425c-9e42-6e8badd9beb0',
+      value: process.env.STRAVA_SP_ID,
       domain: '.strava.com',
       path: '/',
     }

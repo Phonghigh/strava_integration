@@ -1,4 +1,16 @@
 import mongoose from 'mongoose';
+import dns from 'node:dns';
+
+// Force DNS to prefer IPv4.
+dns.setDefaultResultOrder('ipv4first');
+
+// Bypass broken local DNS (192.168.1.1) by using Google DNS for resolution
+try {
+  dns.setServers(['8.8.8.8', '8.8.4.4']);
+  console.log("DNS servers set to Google (8.8.8.8, 8.8.4.4)");
+} catch (e) {
+  console.warn("Could not set DNS servers explicitly:", e.message);
+}
 
 let cachedPromise = null;
 
@@ -13,9 +25,11 @@ export const connectDB = async () => {
 
   const opts = {
     bufferCommands: true, // Allow waiting for connection
-    serverSelectionTimeoutMS: 5000, // Fails fast instead of timing out at 10s
+    serverSelectionTimeoutMS: 10000, // Increased timeout for reliability
+    family: 4, // Force IPv4
   };
 
+  console.log("Connecting to MongoDB via IPv4...");
   cachedPromise = mongoose.connect(process.env.MONGODB_URI, opts).then((mongooseInstance) => {
     console.log(`✅ MongoDB Connected: ${mongooseInstance.connection.host}`);
     return mongooseInstance;

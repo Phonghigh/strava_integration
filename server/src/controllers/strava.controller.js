@@ -9,6 +9,10 @@ import { syncAllUsersActivities } from "../services/sync.service.js";
  * Redirects the user to Strava's OAuth consent screen.
  */
 export const connectStrava = (req, res) => {
+  if (!process.env.STRAVA_CLIENT_ID || !process.env.STRAVA_REDIRECT_URI) {
+    return res.status(500).json({ error: "Strava OAuth is not configured. Please contact the administrator." });
+  }
+
   // Capture optional redirectUrl to return to the specific frontend deployment
   const frontendRedirect = req.query.redirectUrl || process.env.FRONTEND_URL;
 
@@ -35,6 +39,10 @@ export const callback = async (req, res) => {
     // Determine where to redirect back to (state is our passed redirectUrl)
     const finalFrontendUrl = state || process.env.FRONTEND_URL;
 
+    if (!finalFrontendUrl) {
+      return res.status(500).json({ error: "Frontend URL is not configured. Please contact the administrator." });
+    }
+
     if (error) {
       return res.redirect(`${finalFrontendUrl}/?error=${error}`);
     }
@@ -59,7 +67,7 @@ export const callback = async (req, res) => {
     // 3. Trigger an immediate background sync for this user to get their initial data
     console.log(`[Sync] Background sync triggered instantly...`);
     syncAllUsersActivities()
-      .then(res => console.log(`[Sync] Background sync COMPLETED.`, res))
+      .then(syncResult => console.log(`[Sync] Background sync COMPLETED.`, syncResult))
       .catch(err => console.error("[Sync] Initial sync error:", err));
 
     // Redirect to the exact frontend callback page with the JWT token
